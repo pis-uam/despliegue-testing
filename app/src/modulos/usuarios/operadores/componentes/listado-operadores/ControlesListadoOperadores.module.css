@@ -1,0 +1,90 @@
+.contenedor {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--espacio-controles);
+    width: 100%;
+    margin: 0;
+}
+
+.buscador {
+    flex: 1 1 16rem;
+    min-width: 0;
+}
+
+.buscador :global(input[type="search"])::-webkit-search-cancel-button {
+    filter: invert(94.63%) sepia(94%) saturate(1606%) hue-rotate(73.59deg) brightness(50.79%) contrast(173.72%);
+}
+
+.selectMui {
+    width: 100%;
+    min-width: 0;
+}
+
+.controles {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--espacio-controles);
+    margin-left: auto;
+}
+
+.selectorNave {
+    display: grid;
+    width: max-content;
+    min-width: 7.5rem;
+    max-width: 100%;
+}
+
+.selectorNave::before {
+    content: attr(data-opcion-mas-larga);
+    grid-area: 1 / 1;
+    visibility: hidden;
+    white-space: nowrap;
+    padding: 0 2.5rem 0 0.875rem;
+    font-size: var(--tamano-texto);
+}
+
+.controles .selectorNave .selectMui {
+    grid-area: 1 / 1;
+    width: 100%;
+    min-width: 0;
+}
+
+.selectMui :global(.MuiOutlinedInput-root) {
+    background-color: var(--color-surface);
+}
+
+.selectMui :global(.MuiOutlinedInput-notchedOutline) {
+    border-color: var(--color-border);
+}
+
+.selectMui :global(.MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline) {
+    border-color: var(--color-secondary);
+}
+
+.selectMui :global(.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline) {
+    border-color: var(--color-secondary);
+}
+
+.selectMui :global(.MuiInputLabel-root.Mui-focused) {
+    color: var(--color-secondary);
+}
+
+.selectMui :global(.MuiInputBase-input) {
+    color: var(--color-foreground);
+}
+
+.opcionSelect:global(.Mui-selected) {
+    background-color: var(--color-secondary-soft) !important;
+}
+
+@media (max-width: 700px) {
+    .controles {
+        width: 100%;
+        justify-content: space-between;
+    }
+}

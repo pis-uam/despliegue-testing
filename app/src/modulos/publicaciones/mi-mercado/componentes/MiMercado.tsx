@@ -1,0 +1,317 @@
+"use client";
+
+import { fetchConSesion } from "@/modulos/identidad-acceso/autenticacion/cliente-sesion";
+
+import { useMemo, useRef, useState } from "react";
+import Inventory2OutlinedIcon from "@mui/icons-material/Inventory2Outlined";
+import SearchOffOutlinedIcon from "@mui/icons-material/SearchOffOutlined";
+import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
+import EstadoVacio from "@/compartido/componentes/EstadoVacio";
+import { useNotificacionToast } from "@/compartido/componentes/NotificacionToast";
+import AvisoErrorToast from "@/compartido/componentes/AvisoErrorToast";
+import { useRouter } from "next/navigation";
+import EncabezadoPagina from "../../../../compartido/componentes/EncabezadoPagina";
+import { ConfirmModal } from "../../../../compartido/componentes/ConfirmModal";
+import DrawerEditarPublicacion from "../../operadores/componentes/DrawerEditarPublicacion";
+import type { Publicacion } from "../../tipos";
+import type { PublicacionParaEditar, CambiosPublicacionOperador } from "../../operadores/tipos";
+import type { OpcionesEdicionPublicacion } from "../../catalogos/tipos";
+import NuevaPublicacion from "../../operadores/componentes/NuevaPublicacion";
+import FiltrosPublicaciones from "../../filtros/FiltrosPublicaciones";
+import { compararPublicacionesOperador } from "../../filtros/ordenar-publicaciones";
+import type { PublicacionListado } from "../../../consulta-mercado/consultas/consultas-publicaciones-operador";
+import TarjetaPublicacion from "./TarjetaPublicacion";
+import { cargarPublicacionesMiMercado } from "../acciones";
+import { useActualizacionesPublicaciones } from "../../tiempo-real/useActualizacionesPublicaciones";
+import styles from "./MiMercado.module.css";
+import { useCompartirPublicacion } from "../hooks/useCompartirPublicacion";
+import { useSeleccionPublicacion } from "../hooks/useSeleccionPublicacion";
+
+const obtenerNombreOperador = (publicacion: PublicacionListado) => publicacion.operador.nombreFantasia;
+
+type Props = {
+    operadorId: number;
+    nombreOperador?: string;
+    enLicencia?: boolean;
+    abrirAltaInicial?: boolean;
+    publicacionInicialId?: number | null;
+    puedeCrear: boolean;
+    puedeModificar: boolean;
+    puedeEliminar: boolean;
+    publicaciones: Publicacion[];
+    incrementoPrecio: number;
+    opcionesEdicion: OpcionesEdicionPublicacion;
+};
+
+export default function MiMercado({ operadorId, nombreOperador = "", enLicencia = false, abrirAltaInicial = false, publicacionInicialId = null, puedeCrear, puedeModificar, puedeEliminar, publicaciones, incrementoPrecio, opcionesEdicion }: Props) {
+    const router = useRouter();
+    const [altaAbierta, setAltaAbierta] = useState(abrirAltaInicial && puedeCrear);
+    const [listadoRecargado, setListadoRecargado] = useState<{ origen: Publicacion[]; datos: Publicacion[] } | null>(null);
+    const [sincronizando, setSincronizando] = useState(false);
+    const ultimaRecarga = useRef(0);
+    const [publicacionPendiente, setPublicacionPendiente] = useState<Publicacion | null>(null);
+    const [eliminando, setEliminando] = useState(false);
+    const [error, setError] = useState("");
+    const { notificar } = useNotificacionToast();
+    const [idsEliminados, setIdsEliminados] = useState<number[]>([]);
+    const publicacionesActuales = listadoRecargado?.origen === publicaciones ? listadoRecargado.datos : publicaciones;
+    const publicacionesVigentes = useMemo(() => publicacionesActuales.filter((publicacion) => !idsEliminados.includes(publicacion.id)), [publicacionesActuales, idsEliminados]);
+    const { seleccionId, setSeleccionId, avisoPublicacion } = useSeleccionPublicacion(publicacionInicialId, publicacionesVigentes);
+    const publicacionesParaFiltros = useMemo<PublicacionListado[]>(() => publicacionesVigentes.map((publicacion) => ({
+        id: publicacion.id,
+        precio: publicacion.precio === null ? null : Number(publicacion.precio),
+        fecha: publicacion.fecha,
+        foto: publicacion.foto,
+        especie: publicacion.especie.nombreEspecie,
+        variedad: publicacion.variedad?.nombreVariedad ?? "",
+        envase: publicacion.envase?.nombreEnvase ?? "",
+        kilos: publicacion.kilos?.valor ?? "",
+        cantidadUnidades: publicacion.cantidadUnidades == null ? null : Number(publicacion.cantidadUnidades),
+        comentario: publicacion.comentario,
+        categoria: publicacion.categoria?.nombreCategoria ?? "",
+        calibre: publicacion.calibre?.nombreCalibre ?? "",
+        codigoCalibre: publicacion.calibre?.codigoCalibre ?? "",
+        pais: opcionesEdicion.paises.find((pais) => pais.id === publicacion.paisId)?.nombre ?? "",
+        tipoPublicacion: "OPERADOR",
+        operador: { id: operadorId, nombreFantasia: nombreOperador, whatsApp: "" },
+    })), [publicacionesVigentes, operadorId, nombreOperador, opcionesEdicion.paises]);
+    const [publicacionesFiltradas, setPublicacionesFiltradas] = useState<PublicacionListado[]>(() => [...publicacionesParaFiltros].sort((a, b) => compararPublicacionesOperador(a, b, "prioridad")));
+    const publicacionesPorId = new Map(publicacionesVigentes.map((publicacion) => [publicacion.id, publicacion]));
+    const publicacionesVisibles: Publicacion[] = [];
+    for (const publicacionFiltrada of publicacionesFiltradas) {
+        const publicacion = publicacionesPorId.get(publicacionFiltrada.id);
+        if (publicacion) publicacionesVisibles.push(publicacion);
+    }
+
+    const publicacionSeleccionada = publicacionesPorId.get(seleccionId ?? -1) ?? null;
+    const { compartir, preparandoFoto, compartiendo } = useCompartirPublicacion(publicacionSeleccionada, nombreOperador, notificar);
+
+    const publicacionParaEditar: PublicacionParaEditar | null = publicacionSeleccionada ? {
+        publicacionOperadorId: publicacionSeleccionada.publicacionOperadorId,
+        publicacionId: publicacionSeleccionada.id,
+        especieId: publicacionSeleccionada.especie.id,
+        variedadId: publicacionSeleccionada.variedad?.id ?? null,
+        especie: publicacionSeleccionada.especie.nombreEspecie,
+        variedad: publicacionSeleccionada.variedad?.nombreVariedad ?? "",
+        envase: publicacionSeleccionada.envase?.nombreEnvase ?? "",
+        kilos: publicacionSeleccionada.kilos?.valor ?? "",
+        cantidadUnidades: publicacionSeleccionada.cantidadUnidades,
+        comentario: publicacionSeleccionada.comentario,
+        categoria: publicacionSeleccionada.categoria?.nombreCategoria ?? "",
+        calibre: publicacionSeleccionada.calibre?.nombreCalibre ?? "",
+        precio: publicacionSeleccionada.precio,
+        foto: publicacionSeleccionada.foto,
+        estadoFoto: publicacionSeleccionada.estadoFoto,
+        estadoVigencia: publicacionSeleccionada.estadoVigencia,
+        fecha: publicacionSeleccionada.fecha,
+        fechaVigencia: publicacionSeleccionada.fechaVigencia,
+        version: publicacionSeleccionada.version,
+        categoriaId: publicacionSeleccionada.categoria?.id ?? null,
+        calibreId: publicacionSeleccionada.calibre?.id ?? null,
+        envaseId: publicacionSeleccionada.envase?.id ?? null,
+        kilosId: publicacionSeleccionada.kilos?.id ?? null,
+        paisId: publicacionSeleccionada.paisId,
+        disponible: publicacionSeleccionada.publicacionDisponible,
+    } : null;
+
+    function abrirAlta() {
+        setError("");
+        setAltaAbierta(true);
+    }
+
+    function cerrarAlta() {
+        setAltaAbierta(false);
+        if (abrirAltaInicial) router.replace("/mi-mercado", { scroll: false });
+    }
+
+    useActualizacionesPublicaciones(() => sincronizarPublicaciones(), operadorId);
+
+    async function sincronizarPublicaciones() {
+        const recarga = ++ultimaRecarga.current;
+        setSincronizando(true);
+        setError("");
+        try {
+            const datos = await cargarPublicacionesMiMercado(operadorId);
+            if (recarga !== ultimaRecarga.current) return false;
+            setListadoRecargado((anterior) => {
+                const vigentes = anterior?.origen === publicaciones ? anterior.datos : publicaciones;
+                const porId = new Map(vigentes.map((publicacion) => [publicacion.id, publicacion]));
+                return { origen: publicaciones, datos: datos.map((publicacion) => {
+                    const vigente = porId.get(publicacion.id);
+                    return vigente && vigente.version > publicacion.version ? vigente : publicacion;
+                }) };
+            });
+            setIdsEliminados((actuales) => actuales.filter((id) => datos.some((publicacion) => publicacion.id === id)));
+            setSeleccionId((actual) => actual !== null && datos.some((publicacion) => publicacion.id === actual) ? actual : null);
+            setPublicacionPendiente((actual) => actual && datos.some((publicacion) => publicacion.id === actual.id) ? actual : null);
+            return datos;
+        } catch {
+            if (recarga !== ultimaRecarga.current) return false;
+            setError("No se pudo actualizar el listado. Recargá la página.");
+            return false;
+        } finally {
+            if (recarga === ultimaRecarga.current) setSincronizando(false);
+        }
+    }
+
+    function publicacionCreada(aviso: string) {
+        notificar(aviso, "success");
+        cerrarAlta();
+        void sincronizarPublicaciones();
+    }
+
+    function consultarPublicacion(publicacion: Publicacion) {
+        setError("");
+        setSeleccionId(publicacion.id);
+    }
+
+    function solicitarBaja(publicacion: Publicacion) {
+        setError("");
+        setPublicacionPendiente(publicacion);
+    }
+
+    async function guardarCambios(publicacionOperadorId: number, cambios: CambiosPublicacionOperador, fotoNueva: File | null) {
+        if (!publicacionSeleccionada || publicacionSeleccionada.publicacionOperadorId !== publicacionOperadorId) {
+            throw new Error("La publicación seleccionada cambió.");
+        }
+        setError("");
+
+        const formulario = new FormData();
+        formulario.set("cambios", JSON.stringify(cambios));
+        if (fotoNueva) formulario.set("fotografia", fotoNueva);
+
+        const respuesta = await fetchConSesion(`/api/publicaciones/${publicacionSeleccionada.id}?operadorId=${operadorId}`, { method: "PATCH", body: formulario });
+        const resultado = await respuesta.json();
+        if (!respuesta.ok) {
+            if (respuesta.status === 404) {
+                const datos = await sincronizarPublicaciones();
+                if (datos && !datos.some((publicacion) => publicacion.id === publicacionSeleccionada.id)) {
+                    notificar("La publicación ya no está disponible. Se actualizó el listado.", "info");
+                    return;
+                }
+            }
+            if (respuesta.status === 409) await sincronizarPublicaciones();
+            throw new Error(resultado.errores?.join("\n") || "No se pudieron guardar los cambios.");
+        }
+
+        const datos = await sincronizarPublicaciones();
+        const eliminada = datos && !datos.some((publicacion) => publicacion.id === publicacionSeleccionada.id);
+        notificar(eliminada ? "La publicación ya no está disponible. Se actualizó el listado." : resultado.mensaje ?? "Publicación actualizada.", eliminada ? "info" : "success");
+    }
+
+    async function eliminarPublicacion() {
+        if (!publicacionPendiente || eliminando) return;
+        const publicacion = publicacionPendiente;
+        setEliminando(true);
+        setError("");
+        try {
+            const respuesta = await fetchConSesion(`/api/publicaciones/${publicacion.id}?operadorId=${operadorId}`, { method: "DELETE" });
+            const resultado = await respuesta.json();
+            if (!respuesta.ok) {
+                if (respuesta.status === 404) {
+                    const datos = await sincronizarPublicaciones();
+                    if (datos && !datos.some((actual) => actual.id === publicacion.id)) {
+                        setPublicacionPendiente(null);
+                        setSeleccionId((actual) => actual === publicacion.id ? null : actual);
+                        notificar("La publicación ya había sido eliminada. Se actualizó el listado.", "info");
+                        return;
+                    }
+                }
+                throw new Error(resultado.errores?.join("\n") || "No se pudo eliminar la publicación.");
+            }
+
+            setIdsEliminados((actuales) => [...actuales, publicacion.id]);
+            setPublicacionPendiente(null);
+            setSeleccionId((actual) => actual === publicacion.id ? null : actual);
+            await sincronizarPublicaciones();
+            notificar(resultado.mensaje ?? "Publicación eliminada.", "success");
+        } catch (error) {
+            notificar(error instanceof Error ? error.message : "No se pudo conectar con el servidor.", "error");
+            setPublicacionPendiente(null);
+        } finally {
+            setEliminando(false);
+        }
+    }
+
+    function actualizarPrecioLocal(publicacionId: number, nuevoPrecio: number | null, fecha?: string, version?: number) {
+        setListadoRecargado((actual) => {
+            const datosActuales = actual?.origen === publicaciones ? actual.datos : publicaciones;
+            return {
+                origen: publicaciones,
+                datos: datosActuales.map((publicacion) => publicacion.id === publicacionId && (version === undefined || version >= publicacion.version) ? { ...publicacion, precio: nuevoPrecio === null ? null : String(nuevoPrecio), fecha: fecha ?? publicacion.fecha, version: version ?? publicacion.version } : publicacion),
+            };
+        });
+    }
+
+    return (
+        <main className="relative isolate flex-1 bg-background">
+            <div className="contenedor-pagina secciones-pagina relative z-10">
+
+                {/* Encabezado */}
+                <EncabezadoPagina
+                    titulo="Mi Mercado"
+                    subtitulo={`${publicacionesVigentes.length} ${publicacionesVigentes.length === 1 ? "publicación" : "publicaciones"}`}
+                />
+
+                <AvisoErrorToast mensaje={error} cerrarAlCorregir={false} />
+                <AvisoErrorToast mensaje={avisoPublicacion} tipo="warning" />
+                {publicacionesVigentes.length > 0 && (
+                    <div className={styles.filtros}>
+                        <FiltrosPublicaciones obtenerNombreFantasia={obtenerNombreOperador} publicaciones={publicacionesParaFiltros} especieFiltro="" ordenInicial="prioridad" alFiltrar={setPublicacionesFiltradas} />
+                    </div>
+                )}
+                {enLicencia && (
+                    <p className={styles.avisoLicencia} role="status">
+                        <WarningAmberOutlinedIcon aria-hidden="true" />
+                        <span>Estás de licencia, productos ocultos al público</span>
+                    </p>
+                )}
+                <div className={`${styles.encabezadoCatalogo} flex-wrap`}>
+                    <h2 className={styles.titulo}>Publicaciones</h2>
+                    {puedeCrear && <button type="button" onClick={abrirAlta} className="boton-primario">Nueva publicación</button>}
+                </div>
+
+                {publicacionesVigentes.length === 0 ? (
+                    <EstadoVacio
+                        titulo="No tenés publicaciones"
+                        descripcion="Cuando tengas productos publicados aparecerán acá."
+                        icono={<Inventory2OutlinedIcon />}
+                        nivelTitulo={2}
+                        anunciar={false}
+                    />
+                ) : publicacionesVisibles.length === 0 ? (
+                    <EstadoVacio
+                        titulo="No hay publicaciones que coincidan con la búsqueda."
+                        descripcion="Probá cambiando o limpiando los filtros para encontrar tus productos."
+                        icono={<SearchOffOutlinedIcon />}
+                        anunciar={false}
+                    />
+                ) : (
+                    <div className="grilla-tarjetas gap-[var(--espacio-controles)]">
+                        {publicacionesVisibles.map((pub) => (
+                            <TarjetaPublicacion
+                                key={pub.id}
+                                pub={pub}
+                                operadorId={operadorId}
+                                puedeModificar={puedeModificar}
+                                incrementoPrecio={incrementoPrecio}
+                                alConsultar={consultarPublicacion}
+                                alPrecioActualizado={actualizarPrecioLocal}
+                                alPublicacionEliminada={() => void sincronizarPublicaciones()}
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
+            {puedeCrear && altaAbierta && <NuevaPublicacion operadorId={operadorId} incrementoPrecio={incrementoPrecio} abierto={altaAbierta} alCerrar={cerrarAlta} alCrear={publicacionCreada} />}
+            <DrawerEditarPublicacion mostrarAvisoFoto incrementoPrecio={incrementoPrecio} abierto={publicacionSeleccionada !== null} alCerrar={() => setSeleccionId(null)} alGuardar={guardarCambios} publicacion={publicacionParaEditar} modoInicial="consulta" puedeModificar={puedeModificar} puedeEliminar={puedeEliminar} alEliminar={() => { if (publicacionSeleccionada) solicitarBaja(publicacionSeleccionada); }}
+            alCompartir={() => { void compartir(); }}
+            compartiendo={compartiendo || preparandoFoto}
+            eliminando={eliminando} actualizando={sincronizando} {...opcionesEdicion}>
+
+                <ConfirmModal abierto={publicacionPendiente !== null} titulo="Eliminar publicación" descripcion={publicacionPendiente ? `¿Querés eliminar la publicación de ${publicacionPendiente.especie.nombreEspecie}? Esta acción no se puede deshacer.` : ""} textoConfirmar="Sí, eliminar" procesando={eliminando} alCancelar={() => { if (!eliminando) setPublicacionPendiente(null); }} alConfirmar={() => void eliminarPublicacion()} />
+
+            </DrawerEditarPublicacion>
+        </main>
+    );
+}

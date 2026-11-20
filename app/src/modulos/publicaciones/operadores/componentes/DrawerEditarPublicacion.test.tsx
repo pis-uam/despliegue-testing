@@ -1,0 +1,1213 @@
+import type { ComponentProps } from "react";
+import type { DrawerProps } from "@mui/material/Drawer";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import DrawerEditarPublicacion from "./DrawerEditarPublicacion";
+
+const mocks = vi.hoisted(() => ({
+    mediaQuery: vi.fn(),
+    guardar: vi.fn(),
+    cerrar: vi.fn(),
+    eliminar: vi.fn(),
+    crearVistaPrevia: vi.fn(),
+    borrarVistaPrevia: vi.fn(),
+}));
+
+vi.mock("@mui/material/useMediaQuery", () => ({ default: mocks.mediaQuery }));
+vi.mock("@mui/material/Drawer", () => ({
+    default: ({ anchor, open, onClose, children }: DrawerProps) => open ? (
+        <section className="MuiDrawer-paper" role="dialog" aria-label="Drawer de publicación" data-anchor={anchor} onKeyDown={(evento) => { if (evento.key === "Escape") onClose?.(evento, "escapeKeyDown"); }}>
+            {children}
+            <button type="button" aria-label="Cerrar desde fondo" onClick={(evento) => onClose?.(evento, "backdropClick")} />
+        </section>
+    ) : null,
+}));
+
+type PropsDrawer = ComponentProps<typeof DrawerEditarPublicacion>;
+
+const publicacionInicial: NonNullable<PropsDrawer["publicacion"]> = {
+    publicacionOperadorId: 15,
+        version: 1,
+    publicacionId: 41,
+    especieId: 1,
+    variedadId: 11,
+    especie: "Manzana",
+    variedad: "Red Delicious",
+    precio: "100",
+    fecha: "2026-10-03T15:00:00.000Z",
+    foto: null,
+    categoriaId: 3,
+    calibreId: 4,
+    envaseId: 111, kilosId: null,
+    paisId: 44,
+    disponible: true,
+};
+
+const props: PropsDrawer = {
+    abierto: true,
+    alGuardar: mocks.guardar,
+    alCerrar: mocks.cerrar,
+    publicacion: publicacionInicial,
+    especies: [{ id: 1, nombre: "Manzana" }, { id: 2, nombre: "Pera" }],
+    variedades: [
+        { id: 11, nombre: "Red Delicious", especieId: 1 },
+        { id: 12, nombre: "Golden", especieId: 1 },
+        { id: 21, nombre: "Williams", especieId: 2 },
+    ],
+    envases: [
+        { id: 111, nombre: "Descartable" },
+        { id: 112, nombre: "Plancha" },
+        { id: 121, nombre: "Bolsa" },
+        { id: 211, nombre: "Cajon" },
+    ],
+    kilos: [{ id: 301, nombre: "20" }, { id: 302, nombre: "10-12" }],
+    categorias: [
+        { id: 3, nombre: "Primera", especieId: 1 },
+        { id: 5, nombre: "Segunda", especieId: 2 },
+        { id: 6, nombre: "General", especieId: null },
+    ],
+    calibres: [{ id: 4, nombre: "Grande" }, { id: 7, nombre: "Mediano" }],
+    paises: [{ id: 44, nombre: "Uruguay" }, { id: 55, nombre: "Brasil" }],
+};
+
+async function seleccionar(campo: string, opcion: string) {
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: campo }));
+    fireEvent.click(await screen.findByRole("option", { name: opcion }));
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+}
+
+function guardarDesdeBoton() {
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+}
+
+function solicitarGuardado() {
+    const formulario = screen.getByRole("button", { name: "Guardar" }).closest("form");
+    if (!formulario) throw new Error("No se encontró el formulario de edición.");
+    fireEvent.submit(formulario);
+}
+
+function seleccionarFoto(foto: File) {
+    fireEvent.change(screen.getByLabelText("Seleccionar foto del producto"), { target: { files: [foto] } });
+}
+
+describe("DrawerEditarPublicacion", () => {
+    it.each(["modificar", "eliminar"] as const)("deshabilita únicamente la acción %s denegada", (accion) => {
+        render(
+            <DrawerEditarPublicacion
+                {...props}
+                modoInicial="consulta"
+                alGuardar={accion === "modificar" ? undefined : mocks.guardar}
+                alEliminar={accion === "eliminar" ? undefined : mocks.eliminar}
+            />,
+        );
+
+        const editar = screen.getByRole("button", { name: "Editar" });
+        const eliminar = screen.getByRole("button", { name: "Eliminar" });
+        expect(editar).toHaveProperty("disabled", accion === "modificar");
+        expect(eliminar).toHaveProperty("disabled", accion === "eliminar");
+        fireEvent.click(accion === "modificar" ? editar : eliminar);
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        expect(mocks.eliminar).not.toHaveBeenCalled();
+        expect(screen.queryByRole("button", { name: "Guardar" })).not.toBeInTheDocument();
+    });
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.mediaQuery.mockReturnValue(false);
+        mocks.guardar.mockReset().mockResolvedValue(undefined);
+        mocks.crearVistaPrevia.mockReset().mockReturnValue("blob:foto-publicacion");
+        class UrlConVistaPrevia extends URL {
+            static createObjectURL = mocks.crearVistaPrevia;
+            static revokeObjectURL = mocks.borrarVistaPrevia;
+        }
+        vi.stubGlobal("URL", UrlConVistaPrevia);
+    });
+
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it.each([true, false])("ubica el aviso de publicación junto a su fecha y separado de la foto, web=%s", (esWeb) => {
+        mocks.mediaQuery.mockReturnValue(esWeb);
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" mostrarAvisoFoto publicacion={{ ...publicacionInicial, fechaVigencia: "2026-11-25", estadoVigencia: "por-vencer", estadoFoto: "eliminada" }} />);
+        const aviso = screen.getByText("Esta publicación vence el 25/11/2026. Podés actualizar su fecha de vigencia.").closest<HTMLDivElement>('div[role="status"]');
+        const avisoFoto = screen.getByText("La foto venció y fue eliminada. Podés cargar una nueva foto.").closest<HTMLDivElement>('div[role="status"]');
+        expect(aviso).toBeVisible();
+        expect(aviso?.parentElement).toContainElement(screen.getByLabelText("Fecha de vigencia", { selector: "input" }));
+        expect(aviso?.parentElement).not.toContainElement(avisoFoto);
+    });
+
+    it("muestra la publicación vencida aunque no corresponda mostrar el aviso de foto", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacionInicial, fechaVigencia: "2026-11-15", estadoVigencia: "vencida" }} />);
+        expect(screen.getByRole("status")).toHaveTextContent("Esta publicación venció el 15/11/2026 y ya no está disponible.");
+    });
+
+    it("conserva el aviso hasta guardar la nueva vigencia y espera su estado actualizado", async () => {
+        const inicial = { ...publicacionInicial, fechaVigencia: "2026-11-25", estadoVigencia: "por-vencer" as const };
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={inicial} />);
+        const aviso = "Esta publicación vence el 25/11/2026. Podés actualizar su fecha de vigencia.";
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        fireEvent.change(screen.getByLabelText("Fecha de vigencia", { selector: "input" }), { target: { value: "2026-12-25" } });
+        expect(screen.getByText(aviso)).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+        expect(screen.getByText(aviso)).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        fireEvent.change(screen.getByLabelText("Fecha de vigencia", { selector: "input" }), { target: { value: "2026-12-25" } });
+        guardarDesdeBoton();
+        await waitFor(() => expect(screen.getByText("Consulta de publicación")).toBeInTheDocument());
+        expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ fechaVigencia: "2026-12-25" }), null);
+        expect(screen.queryByText(aviso)).not.toBeInTheDocument();
+    });
+
+    it.each([
+        { estadoFoto: "por-vencer", mensaje: "La foto está por vencer." },
+        { estadoFoto: "eliminada", mensaje: "La foto venció y fue eliminada." },
+    ] as const)("explica el estado $estadoFoto al consultar la publicación", ({ estadoFoto, mensaje }) => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" mostrarAvisoFoto publicacion={{ ...publicacionInicial, estadoFoto }} />);
+        expect(screen.getByRole("status")).toHaveTextContent(mensaje);
+    });
+
+    it("no muestra aviso de vencimiento para una publicación que nunca tuvo foto", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" mostrarAvisoFoto />);
+        expect(screen.queryByText(/La foto (está por vencer|venció)/)).not.toBeInTheDocument();
+    });
+
+    it("omite el aviso fuera de Mi Mercado aunque el dato privado esté presente", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacionInicial, estadoFoto: "eliminada" }} />);
+        expect(screen.queryByText(/La foto (está por vencer|venció)/)).not.toBeInTheDocument();
+    });
+
+    it("conserva el aviso al cancelar el reemplazo y sólo lo retira tras guardar la nueva foto", async () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" mostrarAvisoFoto publicacion={{ ...publicacionInicial, estadoFoto: "eliminada" }} />);
+        const aviso = "La foto venció y fue eliminada. Podés cargar una nueva foto.";
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        seleccionarFoto(new File(["foto"], "nueva.webp", { type: "image/webp" }));
+        expect(screen.getByText(aviso)).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+        expect(screen.getByText(aviso)).toBeVisible();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        seleccionarFoto(new File(["foto"], "nueva.webp", { type: "image/webp" }));
+        guardarDesdeBoton();
+        await waitFor(() => expect(screen.getByText("Consulta de publicación")).toBeInTheDocument());
+        expect(mocks.guardar).toHaveBeenCalledOnce();
+        expect(screen.queryByText(aviso)).not.toBeInTheDocument();
+    });
+
+    it("conserva el aviso de foto eliminada al guardar únicamente el precio", async () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" mostrarAvisoFoto publicacion={{ ...publicacionInicial, estadoFoto: "eliminada" }} />);
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "200" } });
+        guardarDesdeBoton();
+        await waitFor(() => expect(screen.getByText("Consulta de publicación")).toBeInTheDocument());
+        expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ foto: undefined }), null);
+        expect(screen.getByRole("status")).toHaveTextContent("La foto venció y fue eliminada.");
+    });
+
+    it("prioriza las especies UAM presentes sin modificar props ni la especie seleccionada", () => {
+        const especies = [
+            props.especies[1], { id: 20, nombre: "Tomate" }, { id: 21, nombre: "Ajo" },
+            { id: 22, nombre: "Banana" }, props.especies[0], { id: 23, nombre: "Papa" },
+        ];
+        Object.freeze(especies);
+        render(<DrawerEditarPublicacion {...props} especies={especies} />);
+        expect(screen.getByRole("combobox", { name: "Especie" })).toHaveTextContent("Manzana");
+        fireEvent.mouseDown(screen.getByRole("combobox", { name: "Especie" }));
+        expect(screen.getAllByRole("option").map((opcion) => opcion.textContent)).toEqual(["Papa", "Banana", "Manzana", "Tomate", "Ajo", "Pera"]);
+        expect(especies.map((opcion) => opcion.nombre)).toEqual(["Pera", "Tomate", "Ajo", "Banana", "Manzana", "Papa"]);
+        fireEvent.click(screen.getByRole("option", { name: "Manzana" }));
+        expect(screen.getByRole("combobox", { name: "Especie" })).toHaveTextContent("Manzana");
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { esWeb: false, anchor: "bottom" },
+        { esWeb: true, anchor: "right" },
+    ])("abre desde $anchor según el tamaño de pantalla", ({ esWeb, anchor }) => {
+        mocks.mediaQuery.mockReturnValue(esWeb);
+        render(<DrawerEditarPublicacion {...props} />);
+
+        expect(mocks.mediaQuery).toHaveBeenCalledWith("(min-width: 768px)");
+        expect(screen.getByRole("dialog", { name: "Drawer de publicación" })).toHaveAttribute("data-anchor", anchor);
+        const entradaFoto = screen.getByLabelText("Seleccionar foto del producto");
+        if (esWeb) expect(entradaFoto).not.toHaveAttribute("capture");
+        else expect(entradaFoto).toHaveAttribute("capture", "environment");
+    });
+
+    it.each([
+        { abierto: false, publicacion: props.publicacion },
+        { abierto: true, publicacion: null },
+    ])("no muestra el drawer cerrado o sin publicación", ({ abierto, publicacion }) => {
+        render(<DrawerEditarPublicacion {...props} abierto={abierto} publicacion={publicacion} />);
+
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("utiliza el incremento configurado al editar el precio", () => {
+        render(<DrawerEditarPublicacion {...props} incrementoPrecio={25} />);
+        const precio = screen.getByLabelText("Precio en pesos");
+        fireEvent.click(screen.getByRole("button", { name: "Aumentar precio en 25" }));
+        expect(precio).toHaveValue("125");
+        fireEvent.click(screen.getByRole("button", { name: "Disminuir precio en 25" }));
+        expect(precio).toHaveValue("100");
+    });
+
+    it.each([false, true])("muestra los datos sin permitir modificarlos en consulta con web=%s", (esWeb) => {
+        mocks.mediaQuery.mockReturnValue(esWeb);
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} publicacion={{ ...publicacionInicial, foto: "/foto-existente.png" }} />);
+
+        screen.getByText("Consulta de publicación")
+        const precio = screen.getByLabelText("Precio en pesos");
+        expect(precio).toHaveValue("100");
+        expect(precio).toHaveAttribute("readonly");
+        for (const etiqueta of ["Precio en pesos", /^Unidades/, "Fecha de vigencia", "Comentario"]) {
+            const campo = screen.getByLabelText(etiqueta, { selector: "input, textarea" });
+            expect(campo).toBeDisabled();
+            if (etiqueta === "Fecha de vigencia") {
+                expect(campo).toHaveAttribute("readonly");
+                const grupo = campo.closest(".MuiPickersInputBase-root") as HTMLElement;
+                expect(grupo).toHaveClass("Mui-disabled", "Mui-readOnly");
+                expect(within(grupo).getByRole("button", { name: "Abrir calendario de Fecha de vigencia" })).toBeDisabled();
+                const secciones = within(grupo).getAllByRole("spinbutton");
+                expect(secciones).toHaveLength(3);
+                for (const seccion of secciones) {
+                    expect(seccion).toHaveAttribute("contenteditable", "false");
+                    expect(seccion).toHaveAttribute("aria-disabled", "true");
+                    expect(seccion).toHaveAttribute("tabindex", "-1");
+                }
+            } else {
+                act(() => campo.focus());
+                expect(campo).not.toHaveFocus();
+            }
+        }
+        expect(screen.queryByRole("switch", { name: "Publicación disponible" })).not.toBeInTheDocument();
+        expect(screen.getByText("Disponible")).toBeInTheDocument();
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", expect.stringContaining("/foto-existente.png"));
+        for (const campo of ["Especie", "Variedad", "Empaquetado", "Kilos del empaquetado", "País", "Categoría", "Calibre"]) {
+            expect(screen.getByRole("combobox", { name: campo })).toHaveAttribute("aria-disabled", "true");
+        }
+        for (const boton of ["Disminuir precio en 10", "Aumentar precio en 10", esWeb ? "Editar foto" : "Cámara", "Galería", "Borrar foto"]) {
+            expect(screen.queryByRole("button", { name: boton })).not.toBeInTheDocument();
+        }
+        expect(screen.queryByLabelText("Seleccionar foto del producto")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Editar" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Eliminar" })).toBeEnabled();
+        expect(screen.queryByRole("button", { name: "Guardar" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+    });
+
+    it.each([false, true])("amplía la foto en consulta y cierra solo la ampliación con web=%s", async (esWeb) => {
+        mocks.mediaQuery.mockReturnValue(esWeb);
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacionInicial, foto: "/foto-existente.png" }} />);
+
+        const ampliar = screen.getByRole("button", { name: "Ampliar foto de Manzana" });
+        expect(ampliar).toHaveAttribute("type", "button");
+        fireEvent.click(ampliar);
+        const dialogo = screen.getByRole("dialog", { name: "Foto ampliada del producto" });
+        expect(within(dialogo).getByAltText("Foto ampliada de Manzana")).toHaveAttribute("src", expect.stringContaining("/foto-existente.png"));
+        fireEvent.click(within(dialogo).getByRole("button", { name: "Cerrar foto ampliada" }));
+
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument());
+        expect(screen.getByText("Consulta de publicación")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Ampliar foto de Manzana" }));
+        fireEvent.keyDown(screen.getByRole("button", { name: "Cerrar foto ampliada" }), { key: "Escape" });
+
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument());
+        expect(screen.getByText("Consulta de publicación")).toBeInTheDocument();
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it.each([null, "", "   "])("no ofrece ampliar una publicación sin foto: %j", (foto) => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacionInicial, foto }} />);
+
+        expect(screen.queryByRole("button", { name: /Ampliar foto/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument();
+        expect(screen.getByText("Sin foto disponible")).toBeInTheDocument();
+    });
+
+    it("descarta la ampliación al cambiar de publicación y al cerrar y reabrir el drawer", async () => {
+        const primera = { ...publicacionInicial, foto: "/foto-manzana.png" };
+        const segunda = {
+            ...publicacionInicial, publicacionOperadorId: 16, publicacionId: 42,
+            especieId: 2, variedadId: 21, especie: "Pera", variedad: "Williams", foto: "/foto-pera.png",
+        };
+        const { rerender } = render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={primera} />);
+        fireEvent.click(screen.getByRole("button", { name: "Ampliar foto de Manzana" }));
+        expect(screen.getByRole("dialog", { name: "Foto ampliada del producto" })).toBeInTheDocument();
+
+        rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={segunda} />);
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: "Ampliar foto de Pera" }));
+        expect(screen.getByAltText("Foto ampliada de Pera")).toHaveAttribute("src", expect.stringContaining("/foto-pera.png"));
+
+        rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={segunda} abierto={false} />);
+        expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument();
+        rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={segunda} />);
+        expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Ampliar foto de Pera" })).toBeInTheDocument();
+    });
+
+    it("actualiza la foto ampliada al recibir cambios de la misma publicación", async () => {
+        const publicacion = { ...publicacionInicial, foto: "/foto-anterior.png" };
+        const { rerender } = render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={publicacion} />);
+        fireEvent.click(screen.getByRole("button", { name: "Ampliar foto de Manzana" }));
+
+        rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacion, foto: "/foto-actualizada.png", version: 2 }} />);
+        const dialogo = screen.getByRole("dialog", { name: "Foto ampliada del producto" });
+        expect(within(dialogo).getByAltText("Foto ampliada de Manzana")).toHaveAttribute("src", expect.stringContaining("/foto-actualizada.png"));
+
+        rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacion, foto: null, version: 3 }} />);
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument());
+        expect(screen.queryByRole("button", { name: /Ampliar foto/ })).not.toBeInTheDocument();
+
+        rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacion, foto: "/foto-restaurada.png", version: 4 }} />);
+        expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Ampliar foto de Manzana" }));
+        expect(screen.getByAltText("Foto ampliada de Manzana")).toHaveAttribute("src", expect.stringContaining("/foto-restaurada.png"));
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])("Editar habilita el formulario sin enviar con web=%s", (esWeb) => {
+        mocks.mediaQuery.mockReturnValue(esWeb);
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} />);
+        const editar = screen.getByRole("button", { name: "Editar" });
+        const clic = createEvent.click(editar, { bubbles: true, cancelable: true });
+
+        fireEvent(editar, clic);
+
+        expect(clic.defaultPrevented).toBe(true);
+        expect(screen.getByText("Editar publicación")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Guardar" })).toBeEnabled();
+        for (const etiqueta of ["Precio en pesos", /^Unidades/, "Fecha de vigencia", "Comentario"]) {
+            expect(screen.getByLabelText(etiqueta, { selector: "input, textarea" })).toBeEnabled();
+        }
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+    });
+
+    it("muestra un error si la cantidad de unidades existente tiene un formato inválido", () => {
+        render(
+            <DrawerEditarPublicacion
+                {...props}
+                publicacion={{
+                    ...publicacionInicial,
+                    cantidadUnidades: 125.50,
+                }}
+            />,
+        );
+        guardarDesdeBoton();
+        expect(screen.getByRole("alert")).toHaveTextContent(
+            "La cantidad de unidades debe ser un número entero de hasta 10 dígitos.",
+        );
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it("vuelve a consulta tras guardar y permite una segunda edición en el mismo drawer", async () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} />);
+        const drawer = screen.getByRole("dialog", { name: "Drawer de publicación" });
+        const precio = screen.getByLabelText("Precio en pesos");
+        const pais = screen.getByRole("combobox", { name: "País" });
+
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+
+        expect(screen.getByRole("dialog", { name: "Drawer de publicación" })).toBe(drawer);
+        expect(screen.getByLabelText("Precio en pesos")).toBe(precio);
+        expect(screen.getByRole("combobox", { name: "País" })).toBe(pais);
+        expect(screen.getByText("Editar publicación")).toBeInTheDocument();
+        expect(precio).not.toHaveAttribute("readonly");
+        expect(screen.getByRole("switch", { name: "Publicación disponible" })).toBeEnabled();
+        expect(pais).not.toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("button", { name: "Cámara" })).toBeEnabled();
+        expect(screen.getByLabelText("Seleccionar foto del producto")).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Disminuir precio en 10" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Aumentar precio en 10" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Cancelar" })).toBeEnabled();
+        expect(screen.queryByRole("button", { name: "Eliminar" })).not.toBeInTheDocument();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        fireEvent.change(precio, { target: { value: "200" } });
+        await seleccionar("País", "Brasil");
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ precio: "200", paisId: 55 }), null));
+        await waitFor(() => expect(screen.getByText("Consulta de publicación")).toBeInTheDocument());
+        expect(screen.getByRole("dialog", { name: "Drawer de publicación" })).toBe(drawer);
+        expect(screen.getByLabelText("Precio en pesos")).toBe(precio);
+        expect(screen.getByRole("combobox", { name: "País" })).toBe(pais);
+        expect(precio).toHaveValue("200");
+        expect(precio).toHaveAttribute("readonly");
+        for (const etiqueta of ["Precio en pesos", /^Unidades/, "Fecha de vigencia", "Comentario"]) {
+            expect(screen.getByLabelText(etiqueta, { selector: "input, textarea" })).toBeDisabled();
+        }
+        expect(pais).toHaveTextContent("Brasil");
+        expect(pais).toHaveAttribute("aria-disabled", "true");
+        expect(screen.queryByRole("switch", { name: "Publicación disponible" })).not.toBeInTheDocument();
+        expect(screen.getByText("Disponible")).toBeInTheDocument();
+        for (const boton of ["Disminuir precio en 10", "Aumentar precio en 10", "Cámara", "Galería", "Borrar foto"]) {
+            expect(screen.queryByRole("button", { name: boton })).not.toBeInTheDocument();
+        }
+        expect(screen.queryByLabelText("Seleccionar foto del producto")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Eliminar" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Editar" })).toBeEnabled();
+        expect(screen.queryByRole("button", { name: "Guardar" })).not.toBeInTheDocument();
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        expect(mocks.eliminar).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        expect(screen.getByLabelText("Precio en pesos")).toBe(precio);
+        expect(precio).toHaveValue("200");
+        expect(pais).toHaveTextContent("Brasil");
+        expect(screen.getByRole("switch", { name: "Publicación disponible" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Aumentar precio en 10" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Cámara" })).toBeEnabled();
+        expect(mocks.guardar).toHaveBeenCalledOnce();
+        fireEvent.change(precio, { target: { value: "300" } });
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledTimes(2));
+        expect(mocks.guardar).toHaveBeenLastCalledWith(15, expect.objectContaining({ precio: "300", paisId: 55 }), null);
+        await waitFor(() => expect(screen.getByText("Consulta de publicación")).toBeInTheDocument());
+        expect(screen.getByRole("dialog", { name: "Drawer de publicación" })).toBe(drawer);
+        expect(precio).toHaveValue("300");
+        expect(precio).toHaveAttribute("readonly");
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+    });
+
+    it("delega la eliminación desde consulta sin guardar cambios", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} />);
+
+        fireEvent.click(screen.getByRole("button", { name: "Eliminar" }));
+
+        expect(mocks.eliminar).toHaveBeenCalledOnce();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it("deshabilita Eliminar cuando no se proporciona una acción de eliminación", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" />);
+
+        expect(screen.getByRole("button", { name: "Eliminar" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Editar" })).toBeEnabled();
+    });
+
+    it("deshabilita Editar cuando no se proporciona una acción de guardado", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alGuardar={undefined} />);
+
+        expect(screen.getByRole("button", { name: "Editar" })).toBeDisabled();
+        expect(screen.getByText("Consulta de publicación")).toBeInTheDocument();
+    });
+
+    it("bloquea las acciones mientras se elimina la publicación", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} eliminando />);
+
+        expect(document.querySelector("[data-drawer-handle]")).toHaveAttribute("data-disabled", "true");
+
+        expect(screen.getByRole("button", { name: /Eliminar|Eliminando/ })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Editar" })).toBeDisabled();
+        expect(screen.getByLabelText("Precio en pesos")).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Cerrar desde fondo" }));
+
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        expect(mocks.eliminar).not.toHaveBeenCalled();
+    });
+
+    it("bloquea las acciones y el cierre mientras se actualizan los datos guardados", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} actualizando />);
+
+        expect(screen.getByLabelText("Precio en pesos").closest("form")).toHaveAttribute("aria-busy", "true");
+        expect(document.querySelector("[data-drawer-handle]")).toHaveAttribute("data-disabled", "true");
+
+        expect(screen.getByRole("button", { name: "Editar" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Eliminar" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Cerrar consulta" })).toBeDisabled();
+        expect(screen.getByLabelText("Precio en pesos")).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Cerrar desde fondo" }));
+
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        expect(mocks.eliminar).not.toHaveBeenCalled();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+it("reemplaza la vista previa por la foto guardada y no reenvía el archivo al editar de nuevo", async () => {
+    const { rerender } = render(<DrawerEditarPublicacion {...props}  modoInicial="consulta" alEliminar={mocks.eliminar} publicacion={{ ...publicacionInicial, foto: "/foto-anterior.png" }}/>);
+    const drawer = screen.getByRole("dialog", { name: "Drawer de publicación" });
+    const archivo = new File(["foto nueva"], "foto-nueva.webp", { type: "image/webp" });
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+    seleccionarFoto(archivo);
+    guardarDesdeBoton();
+    await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith( 15, expect.objectContaining({ precio: "100", foto: undefined }), archivo));
+    await waitFor(() =>expect(screen.getByText("Consulta de publicación")).toBeInTheDocument(),);
+    expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", "blob:foto-publicacion",);
+    expect(screen.queryByRole("button", { name: "Cámara" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Borrar foto" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Seleccionar foto del producto")).not.toBeInTheDocument();
+    expect(mocks.cerrar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Ampliar foto de Manzana" }));
+    expect(screen.getByAltText("Foto ampliada de Manzana")).toHaveAttribute("src", "blob:foto-publicacion");
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar foto ampliada" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument());
+    rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} publicacion={{ ...publicacionInicial, precio: "250", foto: "/uploads/publicaciones/41.webp"}}/>);
+    expect(screen.getByRole("dialog", { name: "Drawer de publicación" })).toBe(drawer);
+    expect(screen.getByText("Consulta de publicación")).toBeInTheDocument();
+    expect(screen.getByLabelText("Precio en pesos")).toHaveValue("250");
+    expect(screen.getByLabelText("Precio en pesos")).toHaveAttribute("readonly");
+    expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", expect.stringContaining("/uploads/publicaciones/41.webp"),);
+    expect(screen.getByText("Disponible")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Publicación disponible" })).not.toBeInTheDocument();
+    expect(mocks.borrarVistaPrevia).toHaveBeenCalledWith("blob:foto-publicacion");
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+    expect(screen.getByRole("button", { name: "Cámara" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Borrar foto" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Precio en pesos"), {target: { value: "260" }});
+    guardarDesdeBoton();
+    await waitFor(() => expect(mocks.guardar).toHaveBeenCalledTimes(2));
+    expect(mocks.guardar).toHaveBeenLastCalledWith(15, expect.objectContaining({ precio: "260", foto: undefined }), null);
+    await waitFor(() => expect(screen.getByText("Consulta de publicación")).toBeInTheDocument());
+    expect(mocks.cerrar).not.toHaveBeenCalled();
+    });
+
+    it("al cancelar la edición vuelve a consulta con los datos originales", async () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} publicacion={{ ...publicacionInicial, foto: "/foto-existente.png" }} />);
+        const drawer = screen.getByRole("dialog", { name: "Drawer de publicación" });
+        const precio = screen.getByLabelText("Precio en pesos");
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        fireEvent.change(precio, { target: { value: "200" } });
+        await seleccionar("País", "Brasil");
+        fireEvent.click(screen.getByRole("switch", { name: "Publicación disponible" }));
+        seleccionarFoto(new File(["foto nueva"], "foto-nueva.webp", { type: "image/webp" }));
+
+        expect(precio).toHaveValue("200");
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveTextContent("Brasil");
+        expect(screen.getByText("No disponible")).toBeInTheDocument();
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", "blob:foto-publicacion");
+
+        fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+
+        expect(screen.getByRole("dialog", { name: "Drawer de publicación" })).toBe(drawer);
+        expect(screen.getByText("Consulta de publicación")).toBeInTheDocument();
+        expect(screen.getByLabelText("Precio en pesos")).toBe(precio);
+        expect(precio).toHaveValue("100");
+        expect(precio).toHaveAttribute("readonly");
+        for (const etiqueta of ["Precio en pesos", /^Unidades/, "Fecha de vigencia", "Comentario"]) {
+            expect(screen.getByLabelText(etiqueta, { selector: "input, textarea" })).toBeDisabled();
+        }
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveTextContent("Uruguay");
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByText("Disponible")).toBeInTheDocument();
+        expect(screen.queryByRole("switch", { name: "Publicación disponible" })).not.toBeInTheDocument();
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", expect.stringContaining("/foto-existente.png"));
+        expect(screen.getByRole("button", { name: "Editar" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Eliminar" })).toBeEnabled();
+        expect(screen.queryByRole("button", { name: "Guardar" })).not.toBeInTheDocument();
+        expect(mocks.borrarVistaPrevia).toHaveBeenCalledWith("blob:foto-publicacion");
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        expect(mocks.eliminar).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        expect(precio).toHaveValue("100");
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveTextContent("Uruguay");
+        expect(screen.getByRole("switch", { name: "Publicación disponible" })).toBeChecked();
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", expect.stringContaining("/foto-existente.png"));
+    });
+
+    it("ignora el envío del formulario mientras sigue en consulta", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} />);
+        const formulario = screen.getByLabelText("Precio en pesos").closest("form");
+        if (!formulario) throw new Error("No se encontró el formulario de consulta.");
+
+        fireEvent.submit(formulario);
+
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        expect(screen.getByText("Consulta de publicación")).toBeInTheDocument();
+    });
+
+    it("conserva la edición y los datos ante un error después de consultar", async () => {
+        mocks.guardar.mockRejectedValueOnce(new Error("No se pudo guardar la publicación."));
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alEliminar={mocks.eliminar} />);
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "200" } });
+        guardarDesdeBoton();
+
+        expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo guardar la publicación.");
+        expect(screen.getByText("Editar publicación")).toBeInTheDocument();
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("200");
+        expect(screen.getByRole("button", { name: "Guardar" })).toBeEnabled();
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+    });
+
+    it("guarda el precio y la disponibilidad actualizados con un solo clic", async () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "150" } });
+        const disponibilidad = screen.getByRole("switch", { name: "Publicación disponible" });
+        expect(disponibilidad).toBeChecked();
+        fireEvent.click(disponibilidad);
+        expect(disponibilidad).not.toBeChecked();
+        expect(screen.getByText("No disponible")).toBeInTheDocument();
+
+        const inputUnidades = screen.getByPlaceholderText("Ingresar cantidad aquí") as HTMLInputElement;
+        fireEvent.change(inputUnidades, { target: { value: "abc" } });
+        expect(inputUnidades.value).toBe("");
+
+        guardarDesdeBoton();
+        expect(screen.queryByRole("dialog", { name: "¿Guardar los cambios?" })).not.toBeInTheDocument();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, {
+            version: 1,
+            especieId: 1,
+            variedadId: 11,
+            precio: "150",
+            foto: undefined,
+            categoriaId: 3,
+            calibreId: 4,
+            envaseId: 111, kilosId: null,
+            paisId: 44,
+            disponible: false,
+            fechaVigencia: null,
+            cantidadUnidades: null,
+            comentario: null,
+        }, null));
+        expect(mocks.guardar).toHaveBeenCalledOnce();
+        await waitFor(() => expect(mocks.cerrar).toHaveBeenCalledOnce());
+    });
+
+    it.each(["0", "00", "125,50", "125.50", "-1", "+1", "1e3", "10000000000", "1.234", "texto"])("conserva el precio entero al intentar escribir o pegar %s",
+        async (precio) => {
+            render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio: "125" }}/>);
+            const entradaPrecio = screen.getByLabelText("Precio en pesos");
+            fireEvent.change(entradaPrecio, { target: { value: precio } });
+            expect(entradaPrecio).toHaveValue("125");
+            expect(mocks.guardar).not.toHaveBeenCalled();
+            fireEvent.click(screen.getByRole("switch", { name: "Publicación disponible" }));
+            guardarDesdeBoton();
+            await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith( 15, expect.objectContaining({ precio: "125", disponible: false }), null));
+        },
+    );
+
+    it.each(["0.00", "12.50", "-1", "10000000000"])("requiere corregir el precio existente inválido %s antes de guardar", (precio) => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio }} />);
+        fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+        expect(screen.getByRole("alert")).toHaveTextContent("El precio debe ser un número entero positivo de hasta 10 dígitos, sin decimales.");
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { precio: "12.00", esperado: "12" },
+        { precio: "9999999999.00", esperado: "9999999999" },
+    ])("normaliza el precio existente $precio como entero $esperado", async ({ precio, esperado }) => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio }} />);
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        await seleccionar("País", "Brasil");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ precio: esperado, paisId: 55 }), null));
+    });
+
+    it("permite corregir un precio existente con decimales antes de guardar", async () => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio: "125.50" }} />);
+        const entradaPrecio = screen.getByLabelText("Precio en pesos");
+
+        expect(entradaPrecio).toHaveValue("125.50");
+        fireEvent.change(entradaPrecio, { target: { value: "125" } });
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ precio: "125" }), null));
+    });
+
+    it("ofrece entrada numérica de texto con un máximo de 10 dígitos", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        const entradaPrecio = screen.getByLabelText("Precio en pesos");
+        expect(entradaPrecio).toHaveAttribute("type", "text");
+        expect(entradaPrecio).toHaveAttribute("inputmode", "numeric");
+        expect(entradaPrecio).toHaveAttribute("maxlength", "10");
+    });
+
+    it("permite guardar sin precio", async () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "" } });
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ precio: null }), null));
+    });
+
+    it("aumenta desde precio nulo y vuelve a sin precio al disminuir hasta cero", () => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio: null }} />);
+        const precio = screen.getByLabelText("Precio en pesos");
+        expect(precio).toHaveValue("");
+        fireEvent.click(screen.getByRole("button", { name: "Disminuir precio en 10" }));
+        expect(precio).toHaveValue("");
+        fireEvent.click(screen.getByRole("button", { name: "Aumentar precio en 10" }));
+        expect(precio).toHaveValue("10");
+        fireEvent.click(screen.getByRole("button", { name: "Disminuir precio en 10" }));
+        expect(precio).toHaveValue("");
+    });
+
+    it.each(["10", "5"])("guarda sin precio cuando la resta desde %s llega a cero o menos", async (precio) => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio }} />);
+
+        fireEvent.click(screen.getByRole("button", { name: "Disminuir precio en 10" }));
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ precio: null }), null));
+    });
+
+    it("filtra las variedades por especie y conserva el envase al cambiar variedad", async () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        fireEvent.mouseDown(screen.getByRole("combobox", { name: "Variedad" }));
+        expect(await screen.findByRole("option", { name: "Golden" })).toBeInTheDocument();
+        expect(screen.queryByRole("option", { name: "Williams" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("option", { name: "Golden" }));
+        await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+        expect(screen.getByRole("combobox", { name: "Empaquetado" })).toHaveTextContent("Descartable");
+        await seleccionar("Empaquetado", "Bolsa");
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ envaseId: 121, kilosId: null }), null));
+    });
+
+    it("limpia la variedad y conserva la categoría y el empaquetado al cambiar especie", async () => {
+        render(<DrawerEditarPublicacion {...props} variedades={[{ id: 20, nombre: "Beurré d'Anjou", especieId: 2 }, ...props.variedades]} />);
+
+        await seleccionar("Especie", "Pera");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).toHaveTextContent("Sin especificar");
+        expect(screen.getByRole("combobox", { name: "Empaquetado" })).toHaveTextContent("Descartable");
+        expect(screen.getByRole("combobox", { name: "Categoría" })).toHaveTextContent("Primera");
+        fireEvent.mouseDown(screen.getByRole("combobox", { name: "Variedad" }));
+        expect(await screen.findByRole("option", { name: "Beurré d'Anjou" })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("option", { name: "Williams" }));
+        await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({
+            especieId: 2, variedadId: 21, envaseId: 111, kilosId: null, categoriaId: 3,
+        }), null));
+    });
+
+    it("cierra desde el botón o el fondo cuando no está guardando", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        expect(document.querySelector("[data-drawer-handle]")).toHaveAttribute("data-disabled", "false");
+
+        fireEvent.click(screen.getByRole("button", { name: "Cerrar edición" }));
+        fireEvent.click(screen.getByRole("button", { name: "Cerrar desde fondo" }));
+
+        expect(mocks.cerrar).toHaveBeenCalledTimes(2);
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it("muestra el error del guardado y conserva el drawer abierto", async () => {
+        mocks.guardar.mockRejectedValue(new Error("La publicación no está disponible para editar."));
+        render(<DrawerEditarPublicacion {...props} />);
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), {target: { value: "101" }});
+        guardarDesdeBoton();
+        expect(await screen.findByRole("alert")).toHaveTextContent("La publicación no está disponible para editar.");
+        expect(screen.getByRole("alert").closest('[role="dialog"]')).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Cerrar notificación" }));
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("101");
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "Guardar" })).toBeEnabled();
+    });
+
+    it("envía el archivo seleccionado y libera su vista previa al cerrar", async () => {
+        const { unmount } = render(<DrawerEditarPublicacion {...props} />);
+        const foto = new File(["imagen"], "publicacion.jpg", { type: "image/jpeg" });
+
+        fireEvent.change(screen.getByLabelText("Seleccionar foto del producto"), { target: { files: [foto] } });
+        expect(mocks.crearVistaPrevia).toHaveBeenCalledWith(foto);
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", "blob:foto-publicacion");
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ foto: undefined }), foto));
+        unmount();
+        expect(mocks.borrarVistaPrevia).toHaveBeenCalledWith("blob:foto-publicacion");
+    });
+
+    it("carga el precio, disponibilidad, foto y opciones de la publicación existente", () => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio: null, foto: "/foto-existente.png", disponible: false }} />);
+        expect(screen.queryByRole("button", { name: /Ampliar foto/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole("dialog", { name: "Foto ampliada del producto" })).not.toBeInTheDocument();
+
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("");
+        expect(screen.getByRole("switch", { name: "Publicación disponible" })).not.toBeChecked();
+        expect(screen.getByText("No disponible")).toBeInTheDocument();
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", expect.stringContaining("/foto-existente.png"));
+        expect(screen.getByRole("combobox", { name: "Especie" })).toHaveTextContent("Manzana");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).toHaveTextContent("Red Delicious");
+        expect(screen.getByRole("combobox", { name: "Categoría" })).toHaveTextContent("Primera");
+        expect(screen.getByRole("combobox", { name: "Calibre" })).toHaveTextContent("Grande");
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveTextContent("Uruguay");
+    });
+
+    it.each([
+        { inicial: "100", boton: "Aumentar precio en 10", esperado: "110" },
+        { inicial: "100", boton: "Disminuir precio en 10", esperado: "90" },
+        { inicial: "5", boton: "Disminuir precio en 10", esperado: "" },
+        { inicial: "10", boton: "Disminuir precio en 10", esperado: "" },
+        { inicial: "9999999999", boton: "Aumentar precio en 10", esperado: "9999999999" },
+        { inicial: "9999999995", boton: "Aumentar precio en 10", esperado: "9999999999" },
+        { inicial: "0.29", boton: "Aumentar precio en 10", esperado: "0.29" },
+        { inicial: "", boton: "Aumentar precio en 10", esperado: "10" },
+        { inicial: "texto", boton: "Aumentar precio en 10", esperado: "texto" },
+    ])("ajusta el precio de $inicial a $esperado respetando sus límites", ({ inicial, boton, esperado }) => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio: inicial }} />);
+        const entradaPrecio = screen.getByLabelText("Precio en pesos");
+
+        fireEvent.click(screen.getByRole("button", { name: boton }));
+
+        expect(entradaPrecio).toHaveValue(esperado);
+    });
+
+    it("guarda un cambio de kilos sin envase ni variedad y conserva el rango al consultar", async () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacionInicial, variedadId: null, envaseId: null }} />);
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        await seleccionar("Kilos del empaquetado", "10-12 kg");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ variedadId: null, envaseId: null, kilosId: 302 }), null));
+        expect(screen.getByRole("combobox", { name: "Kilos del empaquetado" })).toHaveTextContent("10-12 kg");
+        await waitFor(() => expect(screen.getByRole("combobox", { name: "Empaquetado" })).toHaveTextContent("-"));
+        expect(screen.getByLabelText("Unidades")).toBeInTheDocument();
+    });
+
+    it.each(["Empaquetado", "Kilos del empaquetado"])("permite quitar %s sin borrar el otro atributo", async (campo) => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, kilosId: 301 }} />);
+        await seleccionar(campo, "Sin especificar");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ envaseId: campo === "Empaquetado" ? null : 111, kilosId: campo === "Empaquetado" ? 301 : null }), null));
+    });
+
+    it("consulta una publicación con solo especie y conserva las opciones vacías al editar", async () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{
+            ...publicacionInicial, variedadId: null, envaseId: null, kilosId: null, categoriaId: null, calibreId: null,
+            paisId: null, variedad: "", envase: "", kilos: "", categoria: "", calibre: "", precio: null,
+        }} />);
+        for (const campo of ["Variedad", "Empaquetado", "Kilos del empaquetado", "Categoría", "Calibre", "País"]) {
+            expect(screen.getByRole("combobox", { name: campo })).toHaveTextContent("-");
+        }
+        expect(screen.getByLabelText("Unidades")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        for (const campo of ["Variedad", "Empaquetado", "Kilos del empaquetado", "Categoría", "Calibre", "País"]) {
+            expect(screen.getByRole("combobox", { name: campo })).toHaveTextContent("Sin especificar");
+        }
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "80" } });
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({
+            especieId: 1, variedadId: null, envaseId: null, kilosId: null, categoriaId: null,
+            calibreId: null, paisId: null, precio: "80",
+        }), null));
+    });
+
+    it("permite vaciar todos los datos opcionales y conservar solo la especie", async () => {
+        render(<DrawerEditarPublicacion {...props} />);
+        await seleccionar("Variedad", "Sin especificar");
+        await seleccionar("Empaquetado", "Sin especificar");
+        await seleccionar("Categoría", "Sin especificar");
+        await seleccionar("Calibre", "Sin especificar");
+        await seleccionar("País", "Sin especificar");
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "" } });
+        expect(screen.getByRole("combobox", { name: "Empaquetado" })).toHaveTextContent("Sin especificar");
+        expect(screen.getByRole("button", { name: "Guardar" }).closest("form")!.checkValidity()).toBe(true);
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({
+            especieId: 1, variedadId: null, envaseId: null, kilosId: null, categoriaId: null,
+            calibreId: null, paisId: null, precio: null,
+        }), null));
+    });
+
+    it("envía las opciones elegidas manualmente", async () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        await seleccionar("Empaquetado", "Plancha");
+        await seleccionar("Calibre", "Mediano");
+        await seleccionar("Categoría", "General");
+        await seleccionar("País", "Brasil");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({
+            envaseId: 112, kilosId: null, calibreId: 7, categoriaId: 6, paisId: 55,
+        }), null));
+    });
+
+    it("conserva una categoría general al cambiar especie", async () => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, categoriaId: 6 }} />);
+        await seleccionar("Especie", "Pera");
+        expect(screen.getByRole("combobox", { name: "Categoría" })).toHaveTextContent("General");
+        expect(screen.getByRole("combobox", { name: "Empaquetado" })).toHaveTextContent("Descartable");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({
+            especieId: 2, variedadId: null, envaseId: 111, kilosId: null, categoriaId: 6,
+        }), null));
+    });
+
+    it.each([
+        { nombre: "sin variedades", opciones: { variedades: [] } },
+        { nombre: "sin envases", opciones: { envases: [] } },
+        { nombre: "sin categorías", opciones: { categorias: [] } },
+        { nombre: "sin calibres", opciones: { calibres: [] } },
+        { nombre: "sin países", opciones: { paises: [] } },
+    ])("impide guardar un catálogo $nombre", ({ opciones }) => {
+        render(<DrawerEditarPublicacion {...props} {...opciones} />);
+        solicitarGuardado();
+
+        expect(screen.getByRole("alert")).toHaveTextContent("Elegí una especie, variedad, empaquetado, kilos, categoría, calibre y país válidos.");
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it("impide guardar un país que no pertenece al catálogo", () => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, paisId: 999 }} />);
+        solicitarGuardado();
+
+        expect(screen.getByRole("alert")).toHaveTextContent("Elegí una especie, variedad, empaquetado, kilos, categoría, calibre y país válidos.");
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it("descarta los cambios sin guardar al cerrar y reabrir", async () => {
+        const { rerender } = render(<DrawerEditarPublicacion {...props} />);
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "200" } });
+        await seleccionar("País", "Brasil");
+        seleccionarFoto(new File(["imagen"], "foto.jpg", { type: "image/jpeg" }));
+
+        fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+        expect(mocks.cerrar).toHaveBeenCalledOnce();
+        rerender(<DrawerEditarPublicacion {...props} abierto={false} />);
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        expect(mocks.borrarVistaPrevia).toHaveBeenCalledWith("blob:foto-publicacion");
+        rerender(<DrawerEditarPublicacion {...props} />);
+
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("100");
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveTextContent("Uruguay");
+        expect(screen.getByText("Sin foto disponible")).toBeInTheDocument();
+    });
+
+    it("bloquea la edición y el cierre desde el fondo mientras guarda, y evita un segundo envío", async () => {
+        let terminarGuardado: () => void = () => { throw new Error("El guardado no comenzó."); };
+        mocks.guardar.mockImplementation(() => new Promise<void>((resolve) => { terminarGuardado = resolve; }));
+        render(<DrawerEditarPublicacion {...props} />);
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), {target: { value: "101" }});
+        guardarDesdeBoton();
+        await waitFor(() => expect(screen.getByRole("button", { name: "Guardando..." })).toBeDisabled());
+        expect(document.querySelector("[data-drawer-handle]")).toHaveAttribute("data-disabled", "true");
+        for (const etiqueta of ["Precio en pesos", /^Unidades/, "Fecha de vigencia", "Comentario"]) {
+            expect(screen.getByLabelText(etiqueta, { selector: "input, textarea" })).toBeDisabled();
+        }
+        expect(screen.getByLabelText("Seleccionar foto del producto")).toBeDisabled();
+        expect(screen.getByRole("switch", { name: "Publicación disponible" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Cámara" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Cerrar edición" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Cancelar" })).toBeDisabled();
+        expect(screen.getByRole("combobox", { name: "Especie" })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveAttribute("aria-disabled", "true");
+        fireEvent.click(screen.getByRole("button", { name: "Cerrar desde fondo" }));
+        const formulario = screen.getByRole("button", { name: "Guardando..." }).closest("form");
+        if (!formulario) throw new Error("No se encontró el formulario de edición.");
+        fireEvent.submit(formulario);
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        expect(mocks.guardar).toHaveBeenCalledOnce();
+
+        await act(async () => { terminarGuardado(); });
+        expect(mocks.cerrar).toHaveBeenCalledOnce();
+    });
+
+    it("muestra un error genérico y conserva el aviso durante y después del reintento", async () => {
+        let terminarGuardado!: () => void;
+        mocks.guardar.mockRejectedValueOnce(null).mockImplementationOnce(() => new Promise<void>((resolve) => { terminarGuardado = resolve; }));
+        render(<DrawerEditarPublicacion {...props} />);
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), {target: { value: "101" }});
+        await act(async () => { guardarDesdeBoton(); });
+        const aviso = screen.getByRole("alert");
+        expect(aviso).toHaveTextContent("No se pudieron guardar los cambios. Intentá de nuevo.");
+        expect(screen.getByLabelText("Precio en pesos")).toBeEnabled();
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("101");
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        guardarDesdeBoton();
+        expect(screen.getByRole("alert")).toBe(aviso);
+        expect(mocks.guardar).toHaveBeenCalledTimes(2);
+        expect(mocks.cerrar).not.toHaveBeenCalled();
+        await act(async () => { terminarGuardado(); });
+        expect(mocks.cerrar).toHaveBeenCalledOnce();
+        expect(screen.getByRole("alert")).toBe(aviso);
+    });
+
+    it("abre la cámara desde su botón", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+        const entradaFoto = screen.getByLabelText("Seleccionar foto del producto");
+        const abrirArchivos = vi.spyOn(entradaFoto, "click");
+
+        fireEvent.click(screen.getByRole("button", { name: "Cámara" }));
+
+        expect(abrirArchivos).toHaveBeenCalledOnce();
+        expect(entradaFoto).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
+    });
+
+    it("abre la galería sin forzar la cámara en mobile", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+        const entradaGaleria = screen.getByLabelText("Seleccionar foto desde galería");
+        const abrirGaleria = vi.spyOn(entradaGaleria, "click").mockImplementation(() => {});
+
+        expect(entradaGaleria).not.toHaveAttribute("capture");
+        fireEvent.click(screen.getByRole("button", { name: "Galería" }));
+        expect(abrirGaleria).toHaveBeenCalledOnce();
+    });
+
+    it("acepta una fotografía de exactamente 10 MB", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+        const foto = new File([new Uint8Array(10 * 1024 * 1024)], "foto.webp", { type: "image/webp" });
+
+        fireEvent.change(screen.getByLabelText("Seleccionar foto desde galería"), { target: { files: [foto] } });
+        expect(mocks.crearVistaPrevia).toHaveBeenCalledWith(foto);
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it.each([
+        { nombre: "un formato no admitido", foto: new File(["imagen"], "foto.gif", { type: "image/gif" }) },
+        { nombre: "un archivo vacío", foto: new File([], "foto.png", { type: "image/png" }) },
+        { nombre: "un archivo mayor a 10 MB", foto: new File([new Uint8Array(10 * 1024 * 1024 + 1)], "foto.webp", { type: "image/webp" }) },
+    ])("rechaza $nombre sin reemplazar la foto existente", ({ foto }) => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, foto: "/foto-existente.png" }} />);
+        seleccionarFoto(foto);
+
+        expect(screen.getByRole("alert")).toHaveTextContent("Seleccioná una imagen JPEG, PNG o WebP de hasta 10 MB.");
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", expect.stringContaining("/foto-existente.png"));
+        expect(mocks.crearVistaPrevia).not.toHaveBeenCalled();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+    });
+
+    it("no cambia la imagen cuando se cancela la selección de archivos", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+        fireEvent.change(screen.getByLabelText("Seleccionar foto del producto"), { target: { files: [] } });
+
+        expect(screen.getByText("Sin foto disponible")).toBeInTheDocument();
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        expect(mocks.crearVistaPrevia).not.toHaveBeenCalled();
+    });
+
+    it("libera la vista previa anterior al elegir otra foto y envía solamente la última", async () => {
+        mocks.crearVistaPrevia.mockReturnValueOnce("blob:primera-foto").mockReturnValueOnce("blob:segunda-foto");
+        const primeraFoto = new File(["primera"], "primera.png", { type: "image/png" });
+        const segundaFoto = new File(["segunda"], "segunda.webp", { type: "image/webp" });
+        const { unmount } = render(<DrawerEditarPublicacion {...props} />);
+
+        seleccionarFoto(primeraFoto);
+        seleccionarFoto(segundaFoto);
+        expect(mocks.borrarVistaPrevia).toHaveBeenCalledWith("blob:primera-foto");
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", "blob:segunda-foto");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.any(Object), segundaFoto));
+
+        unmount();
+        expect(mocks.borrarVistaPrevia).toHaveBeenCalledWith("blob:segunda-foto");
+    });
+
+    it("descarta el archivo nuevo al borrar la foto y envía null", async () => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, foto: "/foto-existente.png" }} />);
+        seleccionarFoto(new File(["nueva"], "nueva.jpg", { type: "image/jpeg" }));
+        fireEvent.click(screen.getByRole("button", { name: "Borrar foto" }));
+
+        expect(screen.getByText("Sin foto disponible")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Borrar foto" })).not.toBeInTheDocument();
+        expect(mocks.borrarVistaPrevia).toHaveBeenCalledWith("blob:foto-publicacion");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ foto: null }), null));
+    });
+
+    it("borra una foto existente sin crear ni revocar una URL temporal", async () => {
+        render(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, foto: "/foto-existente.png" }} />);
+        fireEvent.click(screen.getByRole("button", { name: "Borrar foto" }));
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ foto: null }), null));
+        expect(mocks.crearVistaPrevia).not.toHaveBeenCalled();
+        expect(mocks.borrarVistaPrevia).not.toHaveBeenCalled();
+    });
+
+    it("limpia el error de una imagen inválida al seleccionar una imagen válida", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+        seleccionarFoto(new File(["imagen"], "foto.gif", { type: "image/gif" }));
+        expect(screen.getByRole("alert")).toBeInTheDocument();
+        seleccionarFoto(new File(["imagen"], "foto.png", { type: "image/png" }));
+
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        expect(screen.getByAltText("Foto de Manzana Red Delicious")).toHaveAttribute("src", "blob:foto-publicacion");
+    });
+    it("no llama a guardar cuando se presiona Guardar sin cambios", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+        guardarDesdeBoton();
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        expect(mocks.cerrar).toHaveBeenCalledOnce();
+    });
+    it("conserva el borrador y su versión cuando llegan cambios remotos", async () => {
+        const vista = render(<DrawerEditarPublicacion {...props} />);
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "150" } });
+        vista.rerender(<DrawerEditarPublicacion {...props} publicacion={{ ...publicacionInicial, precio: "200", version: 2 }} />);
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("150");
+        guardarDesdeBoton();
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({ precio: "150", version: 1 }), null));
+    });
+
+    it("consulta los datos nuevos al cancelar un borrador desactualizado", () => {
+        const vista = render(<DrawerEditarPublicacion {...props} modoInicial="consulta" />);
+        fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+        fireEvent.change(screen.getByLabelText("Precio en pesos"), { target: { value: "150" } });
+        vista.rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacionInicial, precio: "200", version: 2 }} />);
+        fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("200");
+    });
+
+    it("ordena la consulta y conserva compartir por WhatsApp tras actualizar sus datos", () => {
+        const compartir = vi.fn();
+        const publicacion = { ...publicacionInicial, foto: "/foto-existente.png", cantidadUnidades: 12 };
+        const vista = render(<DrawerEditarPublicacion {...props} modoInicial="consulta" alCompartir={compartir} publicacion={publicacion} />);
+        vista.rerender(<DrawerEditarPublicacion {...props} modoInicial="consulta" alCompartir={compartir} publicacion={{ ...publicacion, precio: "200", version: 2 }} />);
+        const botonCompartir = screen.getByRole("button", { name: "Compartir en WhatsApp" });
+        const disponibilidad = screen.getByText("Disponible");
+        expect(disponibilidad.closest("label")?.parentElement).toBe(botonCompartir.parentElement);
+        const orden = [
+            screen.getByLabelText("Precio en pesos"),
+            screen.getByLabelText("Unidades (Descartable)"),
+            screen.getByAltText("Foto de Manzana Red Delicious"),
+            disponibilidad,
+            botonCompartir,
+            ...["Especie", "Variedad", "Empaquetado", "Kilos del empaquetado", "País", "Categoría", "Calibre"]
+                .map((nombre) => screen.getByRole("combobox", { name: nombre })),
+        ];
+        for (let indice = 1; indice < orden.length; indice++) {
+            expect(orden[indice - 1].compareDocumentPosition(orden[indice]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        }
+        expect(screen.getByText("Consulta de publicación")).toBeInTheDocument();
+        fireEvent.click(botonCompartir);
+        expect(compartir).toHaveBeenCalledOnce();
+        expect(screen.getByLabelText("Precio en pesos")).toHaveValue("200");
+    });
+        it("guarda cuando solo cambia el comentario y lo envía sin espacios de los costados", async () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        fireEvent.change(screen.getByLabelText("Comentario"), { target: { value: "  Cosecha de esta semana  " } });
+        guardarDesdeBoton();
+
+        await waitFor(() => expect(mocks.guardar).toHaveBeenCalledWith(15, expect.objectContaining({
+            precio: "100",
+            comentario: "Cosecha de esta semana",
+        }), null));
+        await waitFor(() => expect(mocks.cerrar).toHaveBeenCalledOnce());
+    });
+
+    it("no guarda si el comentario solo tiene espacios y la publicación no tenía comentario", () => {
+        render(<DrawerEditarPublicacion {...props} />);
+
+        fireEvent.change(screen.getByLabelText("Comentario"), { target: { value: "   " } });
+        guardarDesdeBoton();
+
+        expect(mocks.guardar).not.toHaveBeenCalled();
+        expect(mocks.cerrar).toHaveBeenCalledOnce();
+    });
+
+    it("muestra el comentario existente sin permitir modificarlo en consulta", () => {
+        render(<DrawerEditarPublicacion {...props} modoInicial="consulta" publicacion={{ ...publicacionInicial, comentario: "Cosecha de esta semana" }} />);
+
+        const comentario = screen.getByLabelText("Comentario");
+        expect(comentario).toHaveValue("Cosecha de esta semana");
+        expect(comentario).toHaveAttribute("readonly");
+    });
+});

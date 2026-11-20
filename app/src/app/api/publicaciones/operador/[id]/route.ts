@@ -1,0 +1,75 @@
+import { autorizado } from "@/modulos/identidad-acceso/autorizacion/permisos";
+import { NextResponse } from "next/server";
+import { db } from "@/infraestructura/persistencia/prisma/db";
+import { obtenerOperadorAutorizado } from "@/modulos/usuarios/operadores/consultas/operador-actual";
+import { ErrorAutorizacion } from "@/modulos/identidad-acceso/autorizacion/controles";
+
+export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+	if (!autorizado("operador.publicacion.consultar")) {
+		return NextResponse.json({ errores: ["No tiene permisos para consultar publicaciones de Operadores."] }, { status: 403 });
+	}
+
+	const { id } = await context.params;
+	const operadorId = Number(id);
+	if (!Number.isSafeInteger(operadorId) || operadorId <= 0) {
+		return NextResponse.json({ errores: ["El operador no es válido."] }, { status: 400 });
+	}
+
+	try {
+		await obtenerOperadorAutorizado(operadorId);
+
+		const relaciones = await db.orm.public.PublicacionOperador.where({ operadorId }).all();
+		if (relaciones.length === 0) return NextResponse.json({ publicaciones: [] });
+
+		const ids = relaciones.map((relacion) => relacion.publicacionId);
+		const [publicaciones, envases, kilos, variedades, especies, categorias, calibres, paises] = await Promise.all([
+			db.orm.public.Publicacion
+				.where((publicacion) => publicacion.id.in(ids))
+				.select("id", "fecha", "publicacionDisponible", "precio", "especieId", "variedadId", "envaseId", "kilosId", "categoriaId", "calibreId")
+				.all(),
+			db.orm.public.Envase.select("id", "nombreEnvase").all(),
+			db.orm.public.KilosEmpaquetado.select("id", "valor").all(),
+			db.orm.public.Variedad.select("id", "nombreVariedad", "especieId").all(),
+			db.orm.public.Especie.select("id", "nombreEspecie").all(),
+			db.orm.public.Categoria.select("id", "nombreCategoria").all(),
+			db.orm.public.Calibre.select("id", "nombreCalibre").all(),
+			db.orm.public.Pais.select("id", "nombrePais").all(),
+		]);
+
+		const envasePorId = new Map(envases.map((item) => [item.id, item.nombreEnvase]));
+		const kilosPorId = new Map(kilos.map((item) => [item.id, item.valor]));
+		const variedadPorId = new Map(variedades.map((item) => [item.id, item]));
+		const especiePorId = new Map(especies.map((item) => [item.id, item]));
+		const categoriaPorId = new Map(categorias.map((item) => [item.id, item.nombreCategoria]));
+		const calibrePorId = new Map(calibres.map((item) => [item.id, item.nombreCalibre]));
+		const paisPorId = new Map(paises.map((item) => [item.id, item.nombrePais]));
+		const relacionPorPublicacion = new Map(relaciones.map((item) => [item.publicacionId, item]));
+
+		const resultado = publicaciones.map((publicacion) => {
+			const variedad = publicacion.variedadId === null ? undefined : variedadPorId.get(publicacion.variedadId);
+			const especie = especiePorId.get(publicacion.especieId);
+			const relacion = relacionPorPublicacion.get(publicacion.id);
+			return {
+				id: publicacion.id,
+				fecha: publicacion.fecha.toString(),
+				especie: especie?.nombreEspecie ?? "Sin especie",
+				variedad: variedad?.nombreVariedad ?? "Sin variedad",
+				envase: publicacion.envaseId === null ? "" : envasePorId.get(publicacion.envaseId) ?? "",
+				kilos: publicacion.kilosId === null ? "" : kilosPorId.get(publicacion.kilosId) ?? "",
+				categoria: (publicacion.categoriaId === null ? undefined : categoriaPorId.get(publicacion.categoriaId)) ?? "Sin categoría",
+				calibre: (publicacion.calibreId === null ? undefined : calibrePorId.get(publicacion.calibreId)) ?? "Sin calibre",
+				pais: relacion?.paisId ? paisPorId.get(relacion.paisId) ?? "Sin país" : "Sin país",
+				precio: publicacion.precio === null ? null : String(publicacion.precio),
+				disponible: publicacion.publicacionDisponible,
+			};
+		}).sort((a, b) => b.id - a.id);
+
+		return NextResponse.json({ publicaciones: resultado });
+	} catch (error) {
+		if (error instanceof ErrorAutorizacion) {
+			return NextResponse.json({ errores: [error.message] }, { status: error.status });
+		}
+		console.error("Error al listar publicaciones del operador:", error);
+		return NextResponse.json({ errores: ["No se pudieron cargar las publicaciones."] }, { status: 500 });
+	}
+}

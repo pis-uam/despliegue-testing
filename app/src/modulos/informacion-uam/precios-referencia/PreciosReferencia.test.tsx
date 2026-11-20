@@ -1,0 +1,515 @@
+import { fireEvent, render, screen, within } from "@/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { convertirConsultaEnPreciosReferencia, type PrecioReferencia } from "./consultas-precios-referencia";
+import PreciosReferencia from "./PreciosReferencia";
+import { relevamiento } from "../../../../tests/fixtures/precios-referencia.mjs";
+import { MAXIMO_DIGITOS_PRECIO } from "@/modulos/publicaciones/precio-publicacion";
+
+const { navegar } = vi.hoisted(() => ({ navegar: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: navegar }) }));
+
+beforeEach(() => {
+    navegar.mockClear();
+});
+
+const filasConPreciosDistintos: PrecioReferencia[] = [
+    {
+        id: JSON.stringify([0, 1]), especie: "Acelga", variedad: "Común", calibre: "M", pais: "URUGUAY",
+        unidad: "UN", categoria: "I", esReferencia: true,
+        precioMinimoUnidad: 10, precioMaximoUnidad: 90,
+        precioMinimoKg: 100, precioMaximoKg: 120,
+    },
+    {
+        id: JSON.stringify([0, 2]), especie: "Banana", variedad: "Cavendish", calibre: "M", pais: "URUGUAY",
+        unidad: "UN", categoria: "I", esReferencia: true,
+        precioMinimoUnidad: 50, precioMaximoUnidad: 70,
+        precioMinimoKg: 5, precioMaximoKg: 10,
+    },
+    {
+        id: JSON.stringify([0, 3]), especie: "Cebolla", variedad: "Blanca", calibre: "M", pais: "URUGUAY",
+        unidad: "UN", categoria: "I", esReferencia: true,
+        precioMinimoUnidad: 80, precioMaximoUnidad: 100,
+        precioMinimoKg: 20, precioMaximoKg: 80,
+    },
+];
+
+function renderizarPreciosDistintos() {
+    render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filasConPreciosDistintos} />);
+}
+
+function esperarEspeciesEnTabla(...especies: string[]) {
+    const tabla = within(screen.getByRole("table"));
+    const visibles = tabla.getAllByRole("row").slice(1).map((fila) =>
+        within(fila).getAllByRole("cell")[0].textContent,
+    );
+    expect(visibles).toEqual(especies);
+}
+
+function filaFiltro(
+    id: string,
+    especie: string,
+    variedad: string,
+    unidad: string,
+    pais: string,
+    categoria: string,
+    calibre: string,
+): PrecioReferencia {
+    return {
+        id: JSON.stringify([id, 1]), especie, variedad, unidad, pais, categoria, calibre,
+        precioMinimoUnidad: 10, precioMaximoUnidad: 20,
+        precioMinimoKg: 10, precioMaximoKg: 20,
+        esReferencia: true,
+    };
+}
+
+const filasFiltros: PrecioReferencia[] = [
+    filaFiltro("gala-caja-uy", "Manzana", "Gala", "Caja", "URUGUAY", "I", "G"),
+    filaFiltro("gala-caja-br", "Manzana", "Gala", "Caja", "BRASIL", "I", "M"),
+    filaFiltro("gala-bolsa-uy", "Manzana", "Gala", "Bolsa", "URUGUAY", "II", "M"),
+    filaFiltro("fuji-caja-uy", "Manzana", "Fuji", "Caja", "URUGUAY", "I", "M"),
+    filaFiltro("fuji-bolsa-br", "Manzana", "Fuji", "Bolsa", "BRASIL", "II", "G"),
+    filaFiltro("williams-cajon-ar", "Pera", "Williams", "Cajón", "ARGENTINA", "Extra", "P"),
+    filaFiltro("williams-cajon-uy", "Pera", "Williams", "Cajón", "URUGUAY", "I", "G"),
+    filaFiltro("conferencia-bolsa-br", "Pera", "Conferencia", "Bolsa", "BRASIL", "II", "P"),
+    filaFiltro("acelga-atado-uy", "Acelga", "-", "Atado", "URUGUAY", "I", "M"),
+    filaFiltro("acelga-bolsa-br", "Acelga", "-", "Bolsa", "BRASIL", "II", "P"),
+];
+
+function renderizarFiltros() {
+    render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filasFiltros} />);
+}
+
+function seleccionar(nombre: string, opcion: string) {
+    const select = screen.getByRole("combobox", { name: nombre });
+    fireEvent.mouseDown(select);
+    const listbox = screen.getByRole("listbox");
+    const opcionElemento = within(listbox).getByRole("option", { name: opcion });
+    fireEvent.click(opcionElemento);
+}
+
+function opcionesDe(nombre: string) {
+    const select = screen.getByRole("combobox", { name: nombre });
+    if (select.getAttribute("aria-disabled") === "true") return [];
+    fireEvent.mouseDown(select);
+    const listbox = screen.getByRole("listbox");
+    const opciones = within(listbox)
+        .getAllByRole("option")
+        .map((opcion) => opcion.textContent?.trim());
+    fireEvent.keyDown(listbox, { key: "Escape", code: "Escape", keyCode: 27 });
+    return opciones;
+}
+
+function esperarSelectVacio(nombre: string) {
+    const select = screen.getByRole("combobox", { name: nombre });
+    expect(select.textContent?.replace(/\u200b/g, "").trim()).toBe("");
+}
+
+describe("PreciosReferencia", () => {
+    it("prioriza las especies UAM disponibles sin alterar los nombres, la selección ni el orden de la tabla", () => {
+        const nombres = ["Pera", "Lechuga", "Acelga", "MORRON", "papa", "Manzana", "Sandía", "Banana"];
+        const filas = nombres.map((especie, indice) => ({ ...filasConPreciosDistintos[0], id: JSON.stringify([0, indice]), especie }));
+        render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filas} />);
+
+        expect(opcionesDe("Especie")).toEqual([
+            "Todas las especies", "papa", "Banana", "Manzana", "MORRON", "Sandía", "Lechuga", "Acelga", "Pera",
+        ]);
+        esperarSelectVacio("Especie");
+        esperarEspeciesEnTabla("Acelga", "Banana", "Lechuga", "Manzana", "MORRON", "papa", "Pera", "Sandía");
+        expect(filas.map((fila) => fila.especie)).toEqual(nombres);
+
+        seleccionar("Especie", "MORRON");
+        esperarEspeciesEnTabla("MORRON");
+    });
+
+    it.each(["tabla", "móvil"] as const)("abre el histórico desde %s con la especie y filtros de la fila sin clasificación", (vista) => {
+        const fila: PrecioReferencia = {
+            ...filasConPreciosDistintos[1],
+            id: JSON.stringify([2, 60, "Cavendish", "M", "URUGUAY", "UN", "I"]),
+        };
+        render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={[fila]} />);
+
+        const registro = vista === "tabla"
+            ? within(screen.getByRole("table")).getAllByRole("row")[1]
+            : within(screen.getByRole("list", { name: "Precios relevados" })).getByRole("listitem");
+        const enlace = within(registro).getByRole("link", { name: "Ver histórico de Banana, Cavendish" });
+        enlace.focus();
+        expect(enlace).toHaveFocus();
+        expect(enlace).toHaveAttribute("href", "/precios-historicos?species_id=60&producto=Banana&variedad=Cavendish&pais=URUGUAY&calibre=M&categoria=I");
+        fireEvent.click(registro);
+
+        expect(navegar).toHaveBeenCalledOnce();
+        expect(navegar).toHaveBeenCalledWith(
+            "/precios-historicos?species_id=60&producto=Banana&variedad=Cavendish&pais=URUGUAY&calibre=M&categoria=I",
+        );
+    });
+
+    it("muestra solo referencias por defecto y al limpiar, y permite consultar todos los registros", async () => {
+        const datos = convertirConsultaEnPreciosReferencia(relevamiento);
+        render(<PreciosReferencia {...datos} />);
+
+        expect(screen.getByRole("heading", { name: "Precios de referencia" })).toBeInTheDocument();
+        expect(screen.getByRole("checkbox", { name: "Solo registros de referencia" })).toBeChecked();
+        expect(screen.getByText("44 resultados")).toBeInTheDocument();
+        expect(within(screen.getByRole("table")).getAllByText("Referencia").length).toBeGreaterThan(1);
+
+        const filasVisibles = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+        expect(filasVisibles).toHaveLength(40);
+        for (const fila of filasVisibles) {
+            expect(within(fila).getByText("Referencia")).toBeInTheDocument();
+        }
+        fireEvent.click(screen.getByRole("checkbox", { name: "Solo registros de referencia" }));
+        expect(screen.getByText("89 resultados")).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "Limpiar filtros" }));
+        expect(screen.getByRole("checkbox", { name: "Solo registros de referencia" })).toBeChecked();
+        expect(screen.getByText("44 resultados")).toBeInTheDocument();
+    });
+
+    it("encuentra una especie con tilde aunque se busque sin ella", async () => {
+        const datos = convertirConsultaEnPreciosReferencia(relevamiento);
+        render(<PreciosReferencia {...datos} />);
+
+        fireEvent.change(screen.getByRole("searchbox", { name: "Buscar especie o variedad" }), { target: { value: "brocoli" } });
+
+        const filasVisibles = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+        expect(filasVisibles.length).toBeGreaterThan(0);
+        for (const fila of filasVisibles) {
+            expect(within(fila).getByText("Brócoli")).toBeInTheDocument();
+        }
+        expect(screen.queryByText("Acelga")).not.toBeInTheDocument();
+    });
+
+    it("muestra la variedad en su propia columna y omite la clasificación de la vista", () => {
+        const filas = [
+            {
+                id: JSON.stringify([0, 4]), especie: "Manzana", variedad: "Gala",
+                calibre: "M", pais: "URUGUAY", unidad: "KG", categoria: "I",
+                precioMinimoUnidad: 100, precioMaximoUnidad: 120,
+                precioMinimoKg: 100, precioMaximoKg: 120, esReferencia: true,
+            },
+        ];
+        render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filas} />);
+
+        expect(screen.getByRole("columnheader", { name: "Especie" })).toBeInTheDocument();
+        expect(screen.getByRole("columnheader", { name: "Variedad" })).toBeInTheDocument();
+        expect(within(screen.getByRole("table")).getByRole("cell", { name: "Gala" })).toBeInTheDocument();
+        expect(screen.queryByRole("columnheader", { name: "Clasificación" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("combobox", { name: "Clasificación" })).not.toBeInTheDocument();
+    });
+
+    it("filtra por variedad", () => {
+        const base = {
+            especie: "Manzana", calibre: "M", pais: "URUGUAY",
+            unidad: "KG", categoria: "I", precioMinimoUnidad: 100, precioMaximoUnidad: 120,
+            precioMinimoKg: 100, precioMaximoKg: 120, esReferencia: true,
+        };
+        const filas = [
+            { ...base, id: JSON.stringify([0, 4]), variedad: "Gala" },
+            { ...base, id: JSON.stringify([0, 5]), variedad: "Fuji" },
+        ];
+        render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filas} />);
+
+        seleccionar("Especie", "Manzana");
+        seleccionar("Variedad", "Gala");
+
+        expect(screen.getByText("1 resultados")).toBeInTheDocument();
+        expect(within(screen.getByRole("table")).getByRole("cell", { name: "Gala" })).toBeInTheDocument();
+        expect(within(screen.getByRole("table")).queryByRole("cell", { name: "Fuji" })).not.toBeInTheDocument();
+    });
+
+    it("permite usar los filtros adicionales desde el inicio y acota sus opciones al elegir especie y variedad", () => {
+        renderizarFiltros();
+
+        expect(screen.getByRole("combobox", { name: "Variedad" })).toHaveAttribute("aria-disabled", "true");
+        for (const nombre of ["País", "Presentación", "Categoría", "Calibre"]) {
+            expect(screen.getByRole("combobox", { name: nombre })).not.toHaveAttribute("aria-disabled", "true");
+        }
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Atado", "Bolsa", "Caja", "Cajón"]);
+        expect(opcionesDe("Especie")).toEqual(["Todas las especies", "Manzana", "Acelga", "Pera"]);
+
+        seleccionar("Especie", "Manzana");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).not.toHaveAttribute("aria-disabled");
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Bolsa", "Caja"]);
+        expect(opcionesDe("Variedad")).toEqual(["Todas las variedades", "Fuji", "Gala"]);
+        expect(opcionesDe("País")).toEqual(["Todos los países", "URUGUAY", "BRASIL"]);
+
+        seleccionar("Variedad", "Gala");
+        expect(screen.getByRole("combobox", { name: "Presentación" })).not.toHaveAttribute("aria-disabled");
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Bolsa", "Caja"]);
+
+        seleccionar("Presentación", "Bolsa");
+        expect(opcionesDe("País")).toEqual(["Todos los países", "URUGUAY"]);
+        expect(opcionesDe("Categoría")).toEqual(["Todas las categorías", "II"]);
+        expect(opcionesDe("Calibre")).toEqual(["Todos los calibres", "M"]);
+        expect(screen.getByText("1 resultados")).toBeInTheDocument();
+    }, 500_000);
+
+    it("acota País, Categoría, Calibre y Presentación según las facetas elegidas", () => {
+        renderizarFiltros();
+        fireEvent.click(screen.getByRole("button", { name: "Más filtros" }));
+
+        seleccionar("Especie", "Manzana");
+        seleccionar("Variedad", "Gala");
+
+        seleccionar("País", "BRASIL");
+        expect(opcionesDe("Categoría")).toEqual(["Todas las categorías", "I"]);
+        expect(opcionesDe("Calibre")).toEqual(["Todos los calibres", "M"]);
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Caja"]);
+
+        seleccionar("País", "Todos los países");
+        seleccionar("Calibre", "G");
+        expect(opcionesDe("País")).toEqual(["Todos los países", "URUGUAY"]);
+        expect(opcionesDe("Categoría")).toEqual(["Todas las categorías", "I"]);
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Caja"]);
+
+        seleccionar("Calibre", "Todos los calibres");
+        seleccionar("Categoría", "II");
+        expect(opcionesDe("País")).toEqual(["Todos los países", "URUGUAY"]);
+        expect(opcionesDe("Calibre")).toEqual(["Todos los calibres", "M"]);
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Bolsa"]);
+    }, 15000);
+
+    it("conserva facetas compatibles al cambiar de especie y limpia la presentación incompatible", () => {
+        renderizarFiltros();
+        seleccionar("Especie", "Manzana");
+        seleccionar("Variedad", "Gala");
+        seleccionar("Presentación", "Caja");
+        seleccionar("País", "URUGUAY");
+        seleccionar("Categoría", "I");
+        seleccionar("Calibre", "G");
+
+        seleccionar("Especie", "Pera");
+
+        esperarSelectVacio("Variedad");
+        esperarSelectVacio("Presentación");
+        expect(screen.getByRole("combobox", { name: "Presentación" })).not.toHaveAttribute("aria-disabled");
+        expect(screen.getByRole("combobox", { name: "País" })).toHaveTextContent("URUGUAY");
+        expect(screen.getByRole("combobox", { name: "Categoría" })).toHaveTextContent("I");
+        expect(screen.getByRole("combobox", { name: "Calibre" })).toHaveTextContent("G");
+        expect(opcionesDe("Variedad")).toEqual(["Todas las variedades", "Conferencia", "Williams"]);
+        expect(screen.getByText("1 resultados")).toBeInTheDocument();
+        esperarEspeciesEnTabla("Pera");
+    });
+
+    it("descarta las facetas incompatibles al cambiar de especie", () => {
+        renderizarFiltros();
+        seleccionar("Especie", "Pera");
+        seleccionar("Variedad", "Williams");
+        seleccionar("Presentación", "Cajón");
+        seleccionar("País", "ARGENTINA");
+        seleccionar("Categoría", "Extra");
+        seleccionar("Calibre", "P");
+
+        seleccionar("Especie", "Manzana");
+
+        esperarSelectVacio("Variedad");
+        esperarSelectVacio("Presentación");
+        esperarSelectVacio("País");
+        esperarSelectVacio("Categoría");
+        esperarSelectVacio("Calibre");
+        expect(screen.getByText("5 resultados")).toBeInTheDocument();
+        expect(opcionesDe("Variedad")).toEqual(["Todas las variedades", "Fuji", "Gala"]);
+    });
+
+    it("conserva los cuatro filtros libres compatibles y los limpia al elegir una variedad incompatible", () => {
+        const filas = [
+            filaFiltro("gala", "Manzana", "Gala", "Caja", "URUGUAY", "I", "G"),
+            filaFiltro("fuji", "Manzana", "Fuji", "Caja", "URUGUAY", "I", "G"),
+            filaFiltro("granny", "Manzana", "Granny", "Bolsa", "BRASIL", "II", "M"),
+            filaFiltro("williams", "Pera", "Williams", "Caja", "URUGUAY", "I", "G"),
+        ];
+        render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filas} />);
+        const filtros = [["País", "URUGUAY"], ["Presentación", "Caja"], ["Categoría", "I"], ["Calibre", "G"]] as const;
+        for (const [nombre, valor] of filtros) seleccionar(nombre, valor);
+        expect(screen.getByText("3 resultados")).toBeInTheDocument();
+
+        seleccionar("Especie", "Manzana");
+        seleccionar("Variedad", "Gala");
+        seleccionar("Variedad", "Fuji");
+        for (const [nombre, valor] of filtros) {
+            expect(screen.getByRole("combobox", { name: nombre })).toHaveTextContent(valor);
+        }
+        expect(screen.getByText("1 resultados")).toBeInTheDocument();
+
+        seleccionar("Especie", "Pera");
+        for (const [nombre, valor] of filtros) {
+            expect(screen.getByRole("combobox", { name: nombre })).toHaveTextContent(valor);
+        }
+        esperarEspeciesEnTabla("Pera");
+
+        seleccionar("Especie", "Manzana");
+        seleccionar("Variedad", "Granny");
+        for (const [nombre] of filtros) esperarSelectVacio(nombre);
+        expect(screen.getByText("1 resultados")).toBeInTheDocument();
+        expect(within(screen.getByRole("table")).getByRole("cell", { name: "Granny" })).toBeInTheDocument();
+    });
+
+    it("conserva la presentación compatible al cambiar de variedad y la limpia al elegir una especie incompatible", () => {
+        renderizarFiltros();
+        seleccionar("Especie", "Manzana");
+        seleccionar("Variedad", "Gala");
+        seleccionar("Presentación", "Caja");
+
+        seleccionar("Variedad", "Fuji");
+        expect(screen.getByRole("combobox", { name: "Presentación" })).toHaveTextContent("Caja");
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Bolsa", "Caja"]);
+
+        seleccionar("Especie", "Acelga");
+        esperarSelectVacio("Presentación");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).toHaveTextContent("-");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("combobox", { name: "Presentación" })).not.toHaveAttribute("aria-disabled");
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Atado", "Bolsa"]);
+        expect(screen.getByText("2 resultados")).toBeInTheDocument();
+    });
+
+    it("selecciona la variedad '-' compatible y permite elegir otra variedad limpiando el país incompatible", () => {
+        const filas = [
+            filaFiltro("ajo-uruguay", "Ajo", "-", "Caja", "URUGUAY", "I", "M"),
+            filaFiltro("ajo-brasil", "Ajo", "Morado", "Bolsa", "BRASIL", "I", "M"),
+        ];
+        render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filas} />);
+
+        seleccionar("Especie", "Ajo");
+        expect(screen.getByRole("combobox", { name: "Presentación" })).not.toHaveAttribute("aria-disabled");
+
+        seleccionar("País", "URUGUAY");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).toHaveTextContent("-");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).not.toHaveAttribute("aria-disabled");
+        expect(screen.getByRole("combobox", { name: "Presentación" })).not.toHaveAttribute("aria-disabled");
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Caja"]);
+
+        seleccionar("Variedad", "Morado");
+        esperarSelectVacio("País");
+        expect(screen.getByText("1 resultados")).toBeInTheDocument();
+        expect(within(screen.getByRole("table")).getByRole("cell", { name: "BRASIL" })).toBeInTheDocument();
+    });
+
+    it("Limpiar filtros restituye los selects y todas sus opciones", () => {
+        renderizarFiltros();
+        fireEvent.click(screen.getByRole("button", { name: "Más filtros" }));
+        seleccionar("Especie", "Pera");
+        seleccionar("Variedad", "Williams");
+        seleccionar("Presentación", "Cajón");
+        seleccionar("País", "ARGENTINA");
+        seleccionar("Categoría", "Extra");
+        seleccionar("Calibre", "P");
+        fireEvent.click(screen.getByRole("button", { name: "Limpiar filtros" }));
+        esperarSelectVacio("Especie");
+        expect(screen.getByRole("combobox", { name: "Variedad" })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("combobox", { name: "Presentación" })).not.toHaveAttribute("aria-disabled");
+        expect(opcionesDe("Presentación")).toEqual(["Todas las presentaciones", "Atado", "Bolsa", "Caja", "Cajón"]);
+        expect(opcionesDe("País")).toEqual(["Todos los países", "URUGUAY", "ARGENTINA", "BRASIL"]);
+        expect(opcionesDe("Categoría")).toEqual(["Todas las categorías", "Extra", "I", "II"]);
+        expect(opcionesDe("Calibre")).toEqual(["Todos los calibres", "G", "M", "P"]);
+        expect(screen.getByText("10 resultados")).toBeInTheDocument();
+    }, 100_000);
+
+    it("ignora las palabras de clasificación en la búsqueda", async () => {
+        const datos = convertirConsultaEnPreciosReferencia(relevamiento);
+        render(<PreciosReferencia {...datos} />);
+
+        fireEvent.change(screen.getByRole("searchbox", { name: "Buscar especie o variedad" }), {
+            target: { value: "Inflorescencias" },
+        });
+
+        expect(screen.getByText("0 resultados")).toBeInTheDocument();
+    });
+
+    it("filtra el precio mínimo por el mínimo por unidad, inclusive", () => {
+        renderizarPreciosDistintos();
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio mínimo/i }), { target: { value: "50" } });
+
+        expect(screen.getByText("2 resultados")).toBeInTheDocument();
+        esperarEspeciesEnTabla("Banana", "Cebolla");
+    });
+
+    it("filtra el precio máximo por el máximo por unidad, inclusive", () => {
+        renderizarPreciosDistintos();
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio máximo/i }), { target: { value: "70" } });
+
+        expect(screen.getByText("1 resultados")).toBeInTheDocument();
+        esperarEspeciesEnTabla("Banana");
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio mínimo/i }), { target: { value: "50" } });
+        esperarEspeciesEnTabla("Banana");
+    });
+
+    it("cambia entre precios por unidad y por kg para ambos límites", () => {
+        renderizarPreciosDistintos();
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio mínimo/i }), { target: { value: "50" } });
+        esperarEspeciesEnTabla("Banana", "Cebolla");
+
+        fireEvent.mouseDown(screen.getByRole("combobox", { name: /precio por/i }));
+        fireEvent.click(screen.getByRole("option", { name: /kg/i }));
+        esperarEspeciesEnTabla("Acelga");
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio mínimo/i }), { target: { value: "" } });
+        fireEvent.change(screen.getByRole("textbox", { name: /precio máximo/i }), { target: { value: "10" } });
+        esperarEspeciesEnTabla("Banana");
+    });
+
+    it("filtra con límites enteros sin redondear los precios decimales del relevamiento", () => {
+        const filas = [
+            { ...filasConPreciosDistintos[0], precioMinimoUnidad: 12.5, precioMaximoUnidad: 18.5 },
+            { ...filasConPreciosDistintos[1], precioMinimoUnidad: 13.75, precioMaximoUnidad: 20.75 },
+        ];
+        render(<PreciosReferencia fechaRelevamiento="2026-08-27" filas={filas} />);
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio mínimo/i }), { target: { value: "13" } });
+        esperarEspeciesEnTabla("Banana");
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio mínimo/i }), { target: { value: "" } });
+        fireEvent.change(screen.getByRole("textbox", { name: /precio máximo/i }), { target: { value: "20" } });
+        esperarEspeciesEnTabla("Acelga");
+        expect(within(screen.getByRole("table")).getByText("$12,5 - 18,5")).toBeInTheDocument();
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio máximo/i }), { target: { value: "" } });
+        esperarEspeciesEnTabla("Acelga", "Banana");
+    });
+
+    it.each(["Precio mínimo", "Precio máximo"])("acepta sólo un entero positivo o vacío en %s", (campo) => {
+        renderizarPreciosDistintos();
+        const entrada = screen.getByRole("textbox", { name: campo });
+        expect(entrada).toHaveAttribute("inputmode", "numeric");
+        expect(entrada).toHaveAttribute("maxlength", String(MAXIMO_DIGITOS_PRECIO));
+        expect(screen.getByRole("textbox", { name: "Precio mínimo" })).toHaveAttribute("placeholder", "Sin mínimo");
+
+        fireEvent.change(entrada, { target: { value: "9".repeat(MAXIMO_DIGITOS_PRECIO) } });
+        expect(entrada).toHaveValue("9".repeat(MAXIMO_DIGITOS_PRECIO));
+        fireEvent.change(entrada, { target: { value: "050" } });
+        expect(entrada).toHaveValue("050");
+        for (const valor of ["0", "000", "-1", "1.5", "1,5", "1e3", "+1", "texto", " ", "9".repeat(MAXIMO_DIGITOS_PRECIO + 1)]) {
+            fireEvent.change(entrada, { target: { value: valor } });
+            expect(entrada).toHaveValue("050");
+        }
+
+        fireEvent.change(entrada, { target: { value: "" } });
+        expect(entrada).toHaveValue("");
+        esperarEspeciesEnTabla("Acelga", "Banana", "Cebolla");
+    });
+
+    it("permite desplegar y cerrar los filtros adicionales en móvil", () => {
+        renderizarPreciosDistintos();
+
+        const boton = screen.getByRole("button", { name: /más filtros/i });
+        expect(boton).toHaveAttribute("aria-expanded", "false");
+        expect(document.getElementById(boton.getAttribute("aria-controls") ?? "")).toBeInTheDocument();
+
+        fireEvent.click(boton);
+        expect(boton).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getByRole("textbox", { name: /precio mínimo/i })).toBeInTheDocument();
+        expect(screen.getByRole("textbox", { name: /precio máximo/i })).toBeInTheDocument();
+        expect(screen.getByRole("combobox", { name: /precio por/i })).toBeInTheDocument();
+
+        fireEvent.change(screen.getByRole("textbox", { name: /precio mínimo/i }), { target: { value: "50" } });
+        esperarEspeciesEnTabla("Banana", "Cebolla");
+
+        fireEvent.click(boton);
+        expect(boton).toHaveAttribute("aria-expanded", "false");
+        esperarEspeciesEnTabla("Banana", "Cebolla");
+    });
+});

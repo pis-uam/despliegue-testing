@@ -1,0 +1,39 @@
+import { requerirConsultaProductores } from "@/modulos/identidad-acceso/autorizacion/controles";
+import MercadoProduccion from "@/modulos/consulta-mercado/componentes/MercadoProduccion";
+import { consultarPublicacionesProductores } from "@/modulos/consulta-mercado/consultas/consultas-publicaciones-productor";
+import { obtenerConfiguracionOrdenamiento } from "@/modulos/consulta-mercado/consultas/configuracion-ordenamiento";
+import { convertirOrdenMercados } from "@/modulos/consulta-mercado/filtros/ordenamiento-publicaciones";
+
+export const dynamic = "force-dynamic";
+
+type Props = {
+    searchParams?: Promise<{ especie?: string | string[] }>;
+};
+
+export default async function Page({ searchParams }: Props = {}) {
+    const sesion = await requerirConsultaProductores();
+    const parametros = await searchParams;
+    const especie = typeof parametros?.especie === "string" ? parametros.especie : "";
+    const [resultado, configuracion] = await Promise.all([
+        consultarPublicacionesProductores(sesion),
+        obtenerConfiguracionOrdenamiento(),
+    ]);
+    const publicaciones = resultado.publicaciones;
+    const ordenInicial = convertirOrdenMercados(configuracion.ordenMercadoProduccion);
+
+    const contenido = (
+        <div className="relative isolate flex-1 bg-background text-foreground">
+            <main className="contenedor-pagina relative z-10 flex-1">
+                <MercadoProduccion
+                    key={`${especie}-${ordenInicial}-${configuracion.habilitado}`}
+                    publicaciones={publicaciones}
+                    especie={especie}
+                    esAdmin={sesion.rol === "ADMINISTRADOR"}
+                    ordenInicial={ordenInicial}
+                    ordenamientoHabilitado={configuracion.habilitado}
+                />
+            </main>
+        </div>
+    );
+    return contenido; 
+}

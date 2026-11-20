@@ -1,0 +1,58 @@
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
+
+  test: {
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.d.ts",
+        "src/**/migrations/**",
+        "src/infraestructura/persistencia/prisma/**",
+        '**/*.integration.test.ts'
+      ],
+      thresholds: {
+        lines: 80,
+        perFile: false,
+      },
+    },
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          environment: 'jsdom',
+          globals: true,
+          setupFiles: './vitest.setup.ts',
+          include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+          exclude: [
+            '**/*.integration.test.ts',
+            '**/tests/**',
+            '**/node_modules/**',
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'integration',
+          environment: 'node',
+          globals: true,
+          setupFiles: './vitest.integration.setup.ts',
+          include: ['src/**/*.integration.test.ts'],
+          exclude: [
+            '**/tests/**',
+            '**/node_modules/**',
+          ],
+        },
+      },
+    ],
+  },
+})

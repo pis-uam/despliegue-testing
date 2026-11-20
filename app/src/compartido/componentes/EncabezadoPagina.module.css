@@ -1,0 +1,45 @@
+.encabezado {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    box-sizing: border-box;
+    width: 100%;
+    padding: var(--padding-titulo-pagina);
+    border: 1px solid var(--color-secondary-hover);
+    border-radius: var(--radio-panel);
+    background-color: var(--color-secondary);
+    color: var(--color-surface);
+    font-family: var(--font-geist-sans), sans-serif;
+    box-shadow: var(--sombra-panel);
+}
+
+.contenido {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--espacio-textos);
+}
+
+.titulo {
+    margin: 0;
+    color: var(--color-titulo-pagina);
+    font-family: inherit;
+    font-size: var(--tamano-titulo-pagina);
+    font-weight: 700;
+    line-height: var(--interlineado-titulo-pagina);
+}
+
+.subtitulo {
+    margin: 0;
+    color: var(--color-subtitulo-pagina);
+    font-family: inherit;
+    font-size: var(--tamano-subtitulo-pagina);
+    font-weight: 400;
+    line-height: var(--interlineado-subtitulo-pagina);
+}
+
+.cantidad {
+    color: inherit;
+    font: inherit;
+}

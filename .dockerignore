@@ -1,0 +1,27 @@
+# Excluir todo por defecto
+*
+
+# Permitir directorio de la aplicación
+!app/
+
+# Código fuente
+!app/src/
+!app/src/**
+
+# Archivos públicos
+!app/public/
+!app/public/**
+
+# Archivos de configuración necesarios
+!app/package.json
+!app/package-lock.json
+!app/next.config.ts
+!app/postcss.config.mjs
+!app/prisma.config.ts
+!app/tsconfig.json
+
+# Dockerfile y script de inicio
+!deploy/
+!deploy/Dockerfile
+!deploy/app/
+!deploy/app/entrypoint.sh

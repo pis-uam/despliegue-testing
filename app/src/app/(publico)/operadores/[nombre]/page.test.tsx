@@ -1,0 +1,160 @@
+import { render, screen } from "@/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PerfilPublicoOperador } from "../../../../modulos/usuarios/operadores/consultas/consultas-perfil-publico";
+import Page from "./page";
+
+const mocks = vi.hoisted(() => ({
+    obtenerPerfil: vi.fn(),
+    refresh: vi.fn(),
+    obtenerSesion: vi.fn(),
+    redirect: vi.fn(() => { throw new Error("NEXT_REDIRECT") }),
+    notFound: vi.fn(() => {
+        throw new Error("PERFIL_NO_ENCONTRADO");
+    }),
+}));
+
+vi.mock("@/modulos/identidad-acceso/autenticacion/sesiones", () => ({
+    obtenerSesion: mocks.obtenerSesion,
+}));
+
+vi.mock("../../../../modulos/usuarios/operadores/consultas/consultas-perfil-publico", () => ({
+    obtenerPerfilPublicoOperador: mocks.obtenerPerfil,
+}));
+
+vi.mock("next/navigation", () => ({
+    notFound: mocks.notFound,
+    redirect: mocks.redirect,
+    useRouter: () => ({ refresh: mocks.refresh }),
+}));
+
+// Reemplaza Image de Next por un img común
+vi.mock("next/image", async () => {
+    const { createElement } = await import("react");
+    return {
+        default: ({src, alt}: {src: string; alt: string}) => createElement("img", {src, alt}),
+    };
+});
+
+// Datos de prueba
+const perfil: PerfilPublicoOperador = {
+    id: 13,
+    nombreFantasia: "Frutas del Norte",
+    fotoPerfil: null,
+    whatsApp: "+59899100001",
+    locales: [{numeroLocal: "18", nombreNave: "B"}],
+    publicaciones: [{
+        id: 101,
+        foto: null,
+        precio: "120",
+        fecha: "2026-10-03T15:00:00.000Z",
+        especie: "Tomate",
+        variedad: "Perita",
+        envase: "Cajón", kilos: "",
+        categoria: "Extra",
+        calibre: "Grande",
+        codigoCalibre: "G",
+        pais: "URUGUAY",
+    }],
+};
+
+describe("Página pública del operador", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.obtenerSesion.mockResolvedValue(null);
+    });
+
+    it("redirige al operador aunque la URL corresponda a su propio perfil público", async () => {
+        mocks.obtenerSesion.mockResolvedValue({ usuarioId: 10, rol: "OPERADOR", expiraEn: 2000000000 });
+        mocks.obtenerPerfil.mockResolvedValue(perfil);
+        await expect(Page({ params: Promise.resolve({ nombre: encodeURIComponent("Frutas del Norte") }), searchParams: Promise.resolve({})})).rejects.toThrow("NEXT_REDIRECT");
+
+        expect(mocks.redirect).toHaveBeenCalledWith("/mi-mercado");
+        expect(mocks.obtenerPerfil).not.toHaveBeenCalled();
+        expect(mocks.notFound).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { rol: "OPERADOR", destino: "/mi-mercado" },
+        { rol: "PRODUCTOR", destino: "/mi-mercado/productor" },
+        { rol: "ADMINISTRADOR", destino: "/inicio" },
+    ] as const)("redirige a $rol antes de esperar los parámetros o consultar el perfil", async ({ rol, destino }) => {
+        mocks.obtenerSesion.mockResolvedValue({ usuarioId: 10, rol, expiraEn: 2000000000 });
+        const esperarNombre = vi.fn((resolver: (valor: { nombre: string }) => void) => resolver({ nombre: "Frutas" }));
+        const esperarOrigen = vi.fn((resolver: (valor: { origen: string }) => void) => resolver({ origen: "publicaciones" }));
+        const params = { then: esperarNombre } as unknown as Promise<{ nombre: string }>;
+        const searchParams = { then: esperarOrigen } as unknown as Promise<{ origen: string }>;
+
+        await expect(Page({ params, searchParams })).rejects.toThrow("NEXT_REDIRECT");
+
+        expect(mocks.redirect).toHaveBeenCalledExactlyOnceWith(destino);
+        expect(mocks.obtenerSesion).toHaveBeenCalledOnce();
+        expect(esperarNombre).not.toHaveBeenCalled();
+        expect(esperarOrigen).not.toHaveBeenCalled();
+        expect(mocks.obtenerPerfil).not.toHaveBeenCalled();
+        expect(mocks.notFound).not.toHaveBeenCalled();
+    });
+
+    it("no consulta datos cuando falla la verificación de sesión", async () => {
+        const error = new Error("Sesión no disponible");
+        mocks.obtenerSesion.mockRejectedValue(error);
+
+        await expect(Page({ params: Promise.resolve({ nombre: perfil.nombreFantasia }), searchParams: Promise.resolve({}) })).rejects.toBe(error);
+
+        expect(mocks.obtenerPerfil).not.toHaveBeenCalled();
+        expect(mocks.redirect).not.toHaveBeenCalled();
+    });
+
+    it("consulta el operador indicado en la URL y muestra su perfil y catálogo", async () => {
+        mocks.obtenerPerfil.mockResolvedValue(perfil);
+
+        const contenido = await Page({params: Promise.resolve({ nombre: encodeURIComponent("Frutas del Norte") }), searchParams: Promise.resolve({})});
+        render(contenido);
+
+        expect(mocks.obtenerPerfil).toHaveBeenCalledWith("Frutas del Norte");
+        expect(mocks.notFound).not.toHaveBeenCalled();
+        expect(screen.getByRole("main")).toBeInTheDocument();
+        expect(screen.getByRole("heading", {name: "Frutas del Norte"})).toBeInTheDocument();
+        expect(screen.getByRole("heading", {name: "Publicaciones"})).toBeInTheDocument();
+        expect(screen.getByText("Tomate - Perita")).toBeInTheDocument();
+    });
+
+    it("oculta las publicaciones y muestra el aviso cuando el operador está de licencia", async () => {
+        mocks.obtenerPerfil.mockResolvedValue({
+            ...perfil,
+            enLicencia: true,
+            comentario: "Licencia: 2026-11-05 - 2026-11-12\n\nConsultar disponibilidad.",
+        });
+
+        render(await Page({ params: Promise.resolve({ nombre: encodeURIComponent("Frutas del Norte") }), searchParams: Promise.resolve({}) }));
+
+        expect(screen.getAllByRole("status")[0]).toHaveTextContent("Fecha: 05/11/2026 - 12/11/2026");
+        expect(screen.getByText("Consultar disponibilidad.")).toBeInTheDocument();
+        expect(screen.getByText("Sin publicaciones, está de licencia")).toBeInTheDocument();
+        expect(screen.queryByText("Tomate - Perita")).not.toBeInTheDocument();
+    });
+
+    it("llama a notFound cuando el operador no existe", async () => {
+        mocks.obtenerPerfil.mockResolvedValue(null);
+
+        await expect(Page({params: Promise.resolve({ nombre: encodeURIComponent("Operador inexistente") }), searchParams: Promise.resolve({})})).rejects.toThrow("PERFIL_NO_ENCONTRADO");
+
+        expect(mocks.obtenerPerfil).toHaveBeenCalledWith("Operador inexistente");
+        expect(mocks.notFound).toHaveBeenCalledOnce();
+    });
+
+    it.each(["Jorge Ferias", "Frutas & Más", "Frutas 100%", "Frutas %20", "%", "%ZZ", "%C3"])("recupera el nombre original del segmento codificado: %s", async (nombre) => {
+        mocks.obtenerPerfil.mockResolvedValue({ ...perfil, nombreFantasia: nombre });
+
+        await Page({ params: Promise.resolve({ nombre: encodeURIComponent(nombre) }), searchParams: Promise.resolve({}) });
+
+        expect(mocks.redirect).not.toHaveBeenCalled();
+        expect(mocks.obtenerPerfil).toHaveBeenCalledExactlyOnceWith(nombre);
+        expect(mocks.notFound).not.toHaveBeenCalled();
+    });
+
+    it.each(["", "   "])("llama a notFound cuando el nombre está vacío: %s", async (nombre) => {
+        await expect(Page({params: Promise.resolve({ nombre: encodeURIComponent(nombre) }), searchParams: Promise.resolve({})})).rejects.toThrow("PERFIL_NO_ENCONTRADO");
+        expect(mocks.obtenerPerfil).not.toHaveBeenCalled();
+        expect(mocks.notFound).toHaveBeenCalledOnce();
+    });
+});

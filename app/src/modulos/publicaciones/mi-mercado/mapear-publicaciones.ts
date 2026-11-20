@@ -1,0 +1,35 @@
+import type { Publicacion } from "../tipos";
+import type { obtenerPublicacionesDeOperador } from "./consultas-mi-mercado";
+import  { convertirInstantAFechaVigencia, esPublicacionVencida  } from "../vigencia/vigencia-publicacion";
+
+type RelacionesPublicacion = Awaited<ReturnType<typeof obtenerPublicacionesDeOperador>>;
+
+export function mapearPublicacionesMiMercado(relaciones: RelacionesPublicacion): Publicacion[] {
+    
+    return relaciones.map((rel) => {
+        const pub = rel.publicacion;
+        const estaVencida = esPublicacionVencida(pub.fechaVigencia);
+        return {
+            id: pub.id as number,
+            publicacionOperadorId: rel.id,
+            paisId: rel.paisId,
+            foto: pub.foto as string | null,
+            estadoFoto: pub.estadoFoto,
+            estadoVigencia: pub.estadoVigencia,
+            precio: pub.precio === null ? null : String(pub.precio),
+            fecha: pub.fecha.toString(),
+            fechaVigencia: convertirInstantAFechaVigencia(pub.fechaVigencia),
+            version: pub.version,
+            publicacionActiva: pub.publicacionActiva as boolean,
+            publicacionDisponible: estaVencida ? false : (pub.publicacionDisponible as boolean),
+            cantidadUnidades: pub.cantidadUnidades as number | null,
+            comentario: pub.comentario as string | null,
+            especie: { id: pub.especie.id, nombreEspecie: pub.especie.nombreEspecie, fotoEspecie: pub.especie.fotoEspecie },
+            variedad: pub.variedad ? { id: pub.variedad.id, nombreVariedad: pub.variedad.nombreVariedad } : null,
+            envase: pub.envase ? { id: pub.envase.id, nombreEnvase: pub.envase.nombreEnvase } : null,
+            kilos: pub.kilos ? { id: pub.kilos.id, valor: pub.kilos.valor } : null,
+            categoria: pub.categoria ? { id: pub.categoria.id, nombreCategoria: pub.categoria.nombreCategoria } : null,
+            calibre: pub.calibre ? { id: pub.calibre.id, codigoCalibre: pub.calibre.codigoCalibre, nombreCalibre: pub.calibre.nombreCalibre } : null,
+        };
+    });
+}

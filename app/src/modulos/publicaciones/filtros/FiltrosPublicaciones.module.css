@@ -1,0 +1,490 @@
+.contenedor {
+    width: 100%;
+    margin: 0;
+    padding: var(--padding-panel);
+    box-sizing: border-box;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radio-panel);
+    background-color: var(--color-surface);
+    box-shadow: var(--sombra-panel);
+}
+
+.layoutFiltros {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--espacio-controles);
+}
+
+.filtroBuscador,
+.filtroEspecie,
+.filtroNave,
+.filtroVariedad,
+.filtroEnvase,
+.filtroKilos,
+.filtroPrecioMinimo,
+.filtroPrecioMaximo,
+.filtroCategoria,
+.filtroCalibre,
+.barraOpciones {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.filtroBuscador {
+    grid-column: 1 / -1;
+    grid-row: 1;
+}
+
+.filtroBuscador :global(input[type="search"])::-webkit-search-cancel-button {
+    filter: invert(94.63%) sepia(94%) saturate(1606%) hue-rotate(73.59deg) brightness(50.79%) contrast(173.72%);
+}
+
+.filtroEspecie {
+    grid-column: 1 / -1;
+    grid-row: 2;
+}
+
+.conFiltroNave .filtroEspecie {
+    grid-column: 1;
+}
+
+.filtroNave {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+.filtroPrecioMinimo {
+    grid-column: 1;
+    grid-row: 3;
+}
+
+.filtroPrecioMaximo {
+    grid-column: 2;
+    grid-row: 3;
+}
+
+.barraOpciones {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--espacio-controles);
+    width: 100%;
+    grid-column: 1 / -1;
+    grid-row: 4;
+}
+
+.pie {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    grid-column: 1 / -1;
+    margin-top: 0;
+    padding-top: var(--espacio-controles);
+    border-top: 1px solid var(--color-border);
+    transition: margin-top var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros);
+}
+
+.resultados {
+    color: var(--color-foreground);
+    font-size: var(--tamano-texto-secundario);
+}
+
+.layoutFiltros.filtrosAbiertos + .pie {
+    margin-top: var(--espacio-controles);
+}
+
+.limpiar {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-secondary);
+    font-size: var(--tamano-texto-secundario);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.limpiar:hover {
+    text-decoration: underline;
+}
+
+.filtrosExtendidos {
+    display: grid;
+    grid-template-rows: calc(2 * var(--alto-control) + 2 * var(--espacio-controles) + 1px) var(--alto-control);
+    gap: var(--espacio-controles);
+    grid-column: 1 / -1;
+    grid-row: 5;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    height: 0;
+    margin-top: calc(-1 * var(--espacio-controles));
+    box-sizing: border-box;
+    overflow: hidden;
+    visibility: hidden;
+    transition: height var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+        margin-top var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+        visibility 0s linear var(--duracion-despliegue-filtros);
+}
+
+.layoutFiltros.filtrosAbiertos .filtrosExtendidos {
+    height: calc(3 * var(--alto-control) + 3 * var(--espacio-controles) + 1px);
+    margin-top: 0;
+    visibility: visible;
+    transition: height var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+        margin-top var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+        visibility 0s;
+}
+
+.filtrosVariedadEnvase {
+    border-top: 1px solid var(--color-border);
+    padding-top: var(--espacio-controles);
+    box-sizing: border-box;
+}
+
+.filtrosVariedadEnvase,
+.filtrosCategoriaCalibre {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--espacio-controles);
+    width: 100%;
+    min-width: 0;
+    opacity: 0;
+    transition: opacity var(--duracion-salida-filtros) var(--curva-despliegue-filtros);
+}
+
+.layoutFiltros.filtrosAbiertos .filtrosVariedadEnvase,
+.layoutFiltros.filtrosAbiertos .filtrosCategoriaCalibre {
+    opacity: 1;
+    transition: opacity var(--duracion-entrada-filtros) var(--curva-despliegue-filtros) var(--retraso-entrada-filtros);
+}
+
+.filtrosVariedadEnvase {
+    grid-row: 1;
+}
+
+.filtrosCategoriaCalibre {
+    grid-row: 2;
+}
+
+.filtrosVariedadEnvase .filtroVariedad {
+    grid-column: 1 / -1;
+    grid-row: 1;
+}
+
+.filtrosVariedadEnvase .filtroEnvase {
+    grid-column: 1;
+    grid-row: 2;
+}
+
+.filtrosVariedadEnvase .filtroKilos {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+.filtrosCategoriaCalibre .filtroCategoria {
+    grid-column: 1;
+}
+
+.filtrosCategoriaCalibre .filtroCalibre {
+    grid-column: 2;
+}
+
+.selectMui {
+    width: 100%;
+    min-width: 0;
+}
+
+.selectMui :global(.MuiOutlinedInput-root) {
+    background-color: var(--color-surface);
+}
+
+.selectMui :global(.MuiOutlinedInput-notchedOutline) {
+    border-color: var(--color-border);
+}
+
+.selectMui :global(.MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline) {
+    border-color: var(--color-secondary);
+}
+
+.selectMui :global(.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline) {
+    border-color: var(--color-secondary);
+}
+
+.selectMui :global(.MuiInputLabel-root.Mui-focused) {
+    color: var(--color-secondary);
+}
+
+.selectMui :global(.MuiInputBase-input) {
+    color: var(--color-foreground);
+}
+
+.opcionSelect:global(.Mui-selected) {
+    background-color: var(--color-secondary-soft) !important;
+}
+
+.botonExtendidos {
+    flex-shrink: 0;
+}
+
+.botonOrdenar {
+    margin-left: auto;
+}
+
+@media (min-width: 420px) {
+    .barraOpciones {
+        grid-column: 1 / -1;
+        grid-row: 4;
+    }
+
+}
+
+@media (min-width: 600px) {
+    .layoutFiltros {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .filtroBuscador {
+        grid-column: 1 / -1;
+        grid-row: 1;
+    }
+
+    .filtroEspecie {
+        grid-column: 1 / 3;
+        grid-row: 2;
+    }
+
+    .filtroVariedad {
+        grid-column: 3 / 5;
+        grid-row: 2;
+    }
+
+    .filtroEnvase {
+        grid-column: 5 / 7;
+        grid-row: 2;
+    }
+
+    .filtrosVariedadEnvase .filtroKilos {
+        grid-column: 1 / 3;
+        grid-row: 3;
+    }
+
+    .filtroPrecioMinimo {
+        grid-column: 3 / 5;
+        grid-row: 3;
+    }
+
+    .filtroPrecioMaximo {
+        grid-column: 5 / 7;
+        grid-row: 3;
+    }
+
+    .barraOpciones {
+        grid-column: 1 / -1;
+        grid-row: 4;
+    }
+
+    .filtroCategoria {
+        grid-column: 1 / 4;
+        grid-row: 5;
+    }
+
+    .filtroCalibre {
+        grid-column: 4 / 7;
+        grid-row: 5;
+    }
+
+    .filtrosExtendidos,
+    .layoutFiltros.filtrosAbiertos .filtrosExtendidos {
+        display: contents;
+        visibility: visible;
+        transition: none;
+    }
+
+    .filtrosVariedadEnvase {
+        display: contents;
+        opacity: 1;
+        transition: none;
+    }
+
+    .filtrosCategoriaCalibre {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--espacio-controles);
+        grid-column: 1 / 7;
+        grid-row: 5;
+        width: 100%;
+        height: 0;
+        margin-top: calc(-1 * var(--espacio-controles));
+        padding-top: 0;
+        overflow: hidden;
+        border-top: 0 solid var(--color-border);
+        box-sizing: border-box;
+        visibility: hidden;
+        transition: height var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            margin-top var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            padding-top var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            border-top-width var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            opacity var(--duracion-salida-filtros) var(--curva-despliegue-filtros),
+            visibility 0s linear var(--duracion-despliegue-filtros);
+    }
+
+    .layoutFiltros.filtrosAbiertos .filtrosCategoriaCalibre {
+        height: calc(var(--alto-control) + var(--espacio-controles) + 1px);
+        margin-top: 0;
+        padding-top: var(--espacio-controles);
+        border-top-width: 1px;
+        visibility: visible;
+        transition: height var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            margin-top var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            padding-top var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            border-top-width var(--duracion-despliegue-filtros) var(--curva-despliegue-filtros),
+            opacity var(--duracion-entrada-filtros) var(--curva-despliegue-filtros) var(--retraso-entrada-filtros),
+            visibility 0s;
+    }
+
+    .filtrosCategoriaCalibre .filtroCategoria {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    .filtrosCategoriaCalibre .filtroCalibre {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .filtrosVariedadEnvase .filtroVariedad {
+        grid-column: 3 / 5;
+        grid-row: 2;
+    }
+
+    .filtrosVariedadEnvase .filtroEnvase {
+        grid-column: 5 / 7;
+        grid-row: 2;
+    }
+
+    .conFiltroNave .filtroBuscador {
+        grid-column: 1 / 5;
+    }
+
+    .conFiltroNave .filtroEspecie {
+        grid-column: 1 / 3;
+    }
+
+    .conFiltroNave .filtroNave {
+        grid-column: 5 / 7;
+        grid-row: 1;
+    }
+}
+
+@media (min-width: 1000px) {
+    .pie {
+        margin-top: var(--espacio-controles);
+    }
+
+    .layoutFiltros {
+        grid-template-columns: repeat(24, minmax(0, 1fr));
+    }
+
+    .filtroBuscador {
+        grid-column: 1 / 13;
+        grid-row: 1;
+    }
+
+    .filtroEspecie {
+        grid-column: 13 / 19;
+        grid-row: 1;
+    }
+
+    .filtrosExtendidos .filtroVariedad {
+        grid-column: 19 / 25;
+        grid-row: 1;
+    }
+
+    .filtrosExtendidos .filtroEnvase {
+        grid-column: 1 / 5;
+        grid-row: 2;
+    }
+
+    .filtrosExtendidos .filtroKilos {
+        grid-column: 5 / 9;
+        grid-row: 2;
+    }
+
+    .filtrosExtendidos .filtroCategoria {
+        grid-column: 9 / 13;
+        grid-row: 2;
+    }
+
+    .filtrosExtendidos .filtroCalibre {
+        grid-column: 13 / 17;
+        grid-row: 2;
+    }
+
+    .filtroPrecioMinimo {
+        grid-column: 17 / 21;
+        grid-row: 2;
+    }
+
+    .filtroPrecioMaximo {
+        grid-column: 21 / 25;
+        grid-row: 2;
+    }
+
+    .barraOpciones {
+        grid-column: 1 / -1;
+        grid-row: 3;
+        justify-content: flex-end;
+    }
+
+    .barraOpciones .botonExtendidos:first-child {
+        display: none;
+    }
+
+    .filtrosExtendidos {
+        display: contents;
+    }
+
+    .filtrosVariedadEnvase,
+    .filtrosCategoriaCalibre,
+    .layoutFiltros.filtrosAbiertos .filtrosVariedadEnvase,
+    .layoutFiltros.filtrosAbiertos .filtrosCategoriaCalibre {
+        display: contents;
+        opacity: 1;
+        visibility: visible;
+        transition: none;
+    }
+
+    .conFiltroNave .filtroBuscador {
+        grid-column: 1 / 10;
+    }
+
+    .conFiltroNave .filtroEspecie {
+        grid-column: 10 / 15;
+    }
+
+    .conFiltroNave .filtroVariedad {
+        grid-column: 15 / 20;
+    }
+
+    .conFiltroNave .filtroNave {
+        grid-column: 20 / 25;
+    }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pie,
+    .filtrosExtendidos,
+    .filtrosVariedadEnvase,
+    .filtrosCategoriaCalibre,
+    .layoutFiltros.filtrosAbiertos .filtrosExtendidos,
+    .layoutFiltros.filtrosAbiertos .filtrosVariedadEnvase,
+    .layoutFiltros.filtrosAbiertos .filtrosCategoriaCalibre {
+        transition: none;
+    }
+}

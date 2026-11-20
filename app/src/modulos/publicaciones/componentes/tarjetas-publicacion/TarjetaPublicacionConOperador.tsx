@@ -1,0 +1,100 @@
+import { formatearEmpaquetado } from "@/modulos/publicaciones/empaquetado-publicacion";
+import { formatearPrecio } from "@/compartido/formatear-precio";
+import ImagenPublicacion from "../ImagenPublicacion";
+import HideImageOutlinedIcon from "@mui/icons-material/HideImageOutlined";
+import type { PublicacionListado } from "../../../consulta-mercado/consultas/consultas-publicaciones-operador";
+import styles from "./TarjetaPublicacionConOperador.module.css";
+
+type TarjetaPublicacionProps = {
+    publicacion: PublicacionListado;
+    onClick: () => void;
+};
+
+export default function TarjetaPublicacionConOperador({publicacion, onClick}: TarjetaPublicacionProps) {
+    const empaquetado = formatearEmpaquetado(publicacion.envase, publicacion.kilos);
+    const nombreProducto = publicacion.variedad && publicacion.variedad !== "-" ? `${publicacion.especie} - ${publicacion.variedad}` : publicacion.especie;
+    const nombreOperador = publicacion.operador.nombreFantasia;
+
+    return (
+        <button type="button" className={styles.tarjeta} onClick={onClick} aria-label={`Ver detalles de ${nombreProducto}`}>
+            <div className={styles.contenedorImagen}>
+                <ImagenPublicacion src={publicacion.foto} alt={`Foto de ${nombreProducto}`} fill loading="lazy" sizes="(max-width: 419px) 72px, (max-width: 700px) 96px, (max-width: 774.4px) calc(50vw - 24px), (max-width: 1027.2px) calc(33.333vw - 21.333px), (max-width: 1279px) calc(25vw - 20px), 234px" className={styles.imagen} reemplazo={
+                    <div className={styles.sinFoto} role="img" aria-label="Sin foto disponible">
+                        <HideImageOutlinedIcon className={styles.iconoFoto} aria-hidden="true" />
+                        <span className={styles.textoSinFotoWeb}>
+                            Sin foto disponible
+                        </span>
+                    </div>
+                } />
+            </div>
+            <div className={styles.contenido}>
+                <div className={styles.encabezado}>
+                    <h3 className={styles.especie} title={nombreProducto}>
+                        {nombreProducto}
+                    </h3>
+                    {/* Operador visible en mobile */}
+                    <p className={styles.operadorMobile} title={nombreOperador}>
+                        {nombreOperador}
+                    </p>
+                    <p className={styles.informacionWeb}>
+                        <span className={styles.calibreCompleto}>
+                            {publicacion.calibre?.trim() || "-"}
+                        </span>
+                        <span className={styles.codigoCalibre}>
+                            {publicacion.codigoCalibre?.trim() || "-"}
+                        </span>
+                        {" · Categoría "}
+                        {publicacion.categoria?.trim() || "-"}
+                    </p>
+                </div>
+                <div className={styles.cuerpo}>
+                    <div className={styles.informacionMobile}>
+                        <div className={styles.dato}>
+                            <span className={styles.etiqueta}>
+                                Calibre
+                            </span>
+                            <span className={styles.chip}>
+                                <span className={styles.calibreCompleto}>
+                                    {publicacion.calibre?.trim() || "-"}
+                                </span>
+                                <span className={styles.codigoCalibre}>
+                                    {publicacion.codigoCalibre?.trim() || "-"}
+                                </span>
+                            </span>
+                        </div>
+                        <div className={styles.dato}>
+                            <span className={styles.etiqueta}>
+                                Cat.
+                            </span>
+                            <span className={styles.chip}>
+                                {publicacion.categoria?.trim() || "-"}
+                            </span>
+                        </div>
+                    </div>
+                    <div className={styles.filaInferior}>
+                        {/* Operador visible en desktop */}
+                        <p className={styles.operadorDesktop} title={nombreOperador}>
+                            {nombreOperador}
+                        </p>
+                        <div className={styles.contenedorPrecio}>
+                            {publicacion.precio == null ? (
+                                <span className={styles.consultarPrecio}>
+                                    Consultar precio
+                                </span>
+                            ) : (
+                                <span className={styles.precio}>
+                                    {formatearPrecio(publicacion.precio)}
+                                </span>
+                            )}
+                            {empaquetado && (
+                                <span className={styles.presentacionPrecio} title={`por ${empaquetado}`}>
+                                    por {empaquetado}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </button>
+    );
+}

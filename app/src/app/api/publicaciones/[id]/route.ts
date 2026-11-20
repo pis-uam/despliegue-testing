@@ -1,0 +1,181 @@
+import { normalizarSeleccionPublicacion } from "@/modulos/publicaciones/seleccion-publicacion";
+import { obtenerSesion } from "@/modulos/identidad-acceso/autenticacion/sesiones";
+import { autorizado } from "@/modulos/identidad-acceso/autorizacion/permisos";
+import { NextResponse } from "next/server";
+import { obtenerOperadorAutorizado, obtenerOperadorPorId } from "@/modulos/usuarios/operadores/consultas/operador-actual";
+import { bajaPublicacionOperador } from "@/modulos/publicaciones/operadores/operaciones/baja-publicacion";
+import { db } from "@/infraestructura/persistencia/prisma/db";
+import { ErrorAutorizacion } from "@/modulos/identidad-acceso/autorizacion/controles";
+import { ErrorEdicionPublicacion, modificarPublicacionOperador } from "@/modulos/publicaciones/operadores/operaciones/modificar-publicacion";
+import type { CambiosPublicacionOperador } from "@/modulos/publicaciones/operadores/tipos";
+import { revalidatePath } from "next/cache";
+import { ErrorCuerpoDemasiadoGrande, leerFormularioLimitado } from "@/infraestructura/http/cuerpo-limitado";
+import { registrarPublicacion } from "@/modulos/administracion/estadisticas/registrar-estadisticas";
+
+export const runtime = "nodejs";
+
+type Contexto = { params: Promise<{ id: string }> };
+
+function leerOperadorId(solicitud: Request): number | null | undefined {
+	const valores = new URL(solicitud.url).searchParams.getAll("operadorId");
+	if (valores.length === 0) return undefined;
+	if (valores.length !== 1 || !/^[1-9]\d*$/.test(valores[0])) return null;
+	const operadorId = Number(valores[0]);
+	return Number.isSafeInteger(operadorId) ? operadorId : null;
+}
+
+function actualizarVistas(operador: { nombreFantasia: string }) {
+	const rutas = [
+		"/mi-mercado",
+		`/mi-mercado/${encodeURIComponent(operador.nombreFantasia)}`,
+		"/publicaciones",
+		`/operadores/${encodeURIComponent(operador.nombreFantasia)}`,
+		"/operadores",
+		"/inicio",
+	];
+	for (const ruta of rutas) {
+		try {
+			revalidatePath(ruta);
+		} catch (error) {
+			console.error(`No se pudo revalidar ${ruta} tras guardar la publicacion:`, error);
+		}
+	}
+}
+
+export async function DELETE(solicitud: Request, contexto: Contexto) {
+	const sesion = await obtenerSesion();
+	if (!sesion) return NextResponse.json({ errores: ["Debe iniciar sesión."] }, { status: 401 });
+
+	const { id: identificador } = await contexto.params;
+	const publicacionId = Number(identificador);
+	if (!Number.isSafeInteger(publicacionId) || publicacionId <= 0) {
+		return NextResponse.json({ errores: ["La publicación o el operador no son válidos."] }, { status: 400 });
+	}
+	const operadorId = leerOperadorId(solicitud);
+	if (operadorId === null) {
+		return NextResponse.json({ errores: ["El operador no es válido."] }, { status: 400 });
+	}
+
+	try {
+		let operador;
+		if (autorizado("administracion.publicacion.eliminar", sesion)) {
+			if (operadorId === undefined) {
+				return NextResponse.json({ errores: ["Debe seleccionar un operador."] }, { status: 400 });
+			}
+			operador = await obtenerOperadorPorId(operadorId);
+			if (!operador) {
+				return NextResponse.json({ errores: ["El operador no existe."] }, { status: 404 });
+			}
+		} else {
+			operador = await obtenerOperadorAutorizado(operadorId);
+			if (!autorizado("operador.publicacion.eliminar", sesion, operador)) {
+				return NextResponse.json({ errores: ["No tiene permisos para gestionar publicaciones de este Operador."] }, { status: 403 });
+			}
+		}
+
+		const eliminada = await bajaPublicacionOperador(publicacionId, operador.id);
+		if (!eliminada) return NextResponse.json({ errores: ["La publicación no pertenece al operador seleccionado."] }, { status: 404 });
+		actualizarVistas(operador);
+		return NextResponse.json({ mensaje: "Publicación eliminada." });
+	} catch (error) {
+		if (error instanceof ErrorAutorizacion) {
+			return NextResponse.json({ errores: [error.message] }, { status: error.status });
+		}
+		console.error("Error al eliminar publicación:", error);
+		return NextResponse.json({ errores: ["No se pudo eliminar la publicación."] }, { status: 500 });
+	}
+}
+
+export async function PATCH(solicitud: Request, contexto: Contexto) {
+	const sesion = await obtenerSesion();
+	if (!sesion) return NextResponse.json({ errores: ["Debe iniciar sesión."] }, { status: 401 });
+
+	const { id: identificador } = await contexto.params;
+	const publicacionId = Number(identificador);
+	if (!Number.isSafeInteger(publicacionId) || publicacionId <= 0) {
+		return NextResponse.json({ errores: ["La publicación no es válida."] }, { status: 400 });
+	}
+	const operadorId = leerOperadorId(solicitud);
+	if (operadorId === null) {
+		return NextResponse.json({ errores: ["El operador no es válido."] }, { status: 400 });
+	}
+
+	let cambios: unknown;
+	let fotoNueva: File | null = null;
+	try {
+		const formulario = await leerFormularioLimitado(solicitud);
+		const datos = formulario.get("cambios");
+		if (typeof datos !== "string") {
+			return NextResponse.json({ errores: ["Los cambios no son válidos."] }, { status: 400 });
+		}
+		cambios = JSON.parse(datos);
+		const fotografia = formulario.get("fotografia");
+		if (typeof fotografia === "string") {
+			return NextResponse.json({ errores: ["La fotografía no es válida."] }, { status: 400 });
+		}
+		fotoNueva = fotografia;
+	} catch (error) {
+		if (error instanceof ErrorCuerpoDemasiadoGrande) {
+			return NextResponse.json({ errores: [error.message] }, { status: 413 });
+		}
+		return NextResponse.json({ errores: ["No se pudieron leer los cambios de la publicación."] }, { status: 400 });
+	}
+
+	if (typeof cambios !== "object" || cambios === null || Array.isArray(cambios)) {
+		return NextResponse.json({ errores: ["Los cambios no son válidos."] }, { status: 400 });
+	}
+	const datos = cambios as Record<string, unknown>;
+	const seleccion = normalizarSeleccionPublicacion(datos);
+	if (!seleccion.esValido ||
+		(datos.foto !== undefined && datos.foto !== null && typeof datos.foto !== "string")) {
+		return NextResponse.json({ errores: ["Los cambios no son válidos."] }, { status: 400 });
+	}
+
+	try {
+		let operador;
+		if (autorizado("administracion.publicacion.modificar", sesion)) {
+			if (operadorId === undefined) {
+				return NextResponse.json({ errores: ["Debe seleccionar un operador."] }, { status: 400 });
+			}
+			operador = await obtenerOperadorPorId(operadorId);
+			if (!operador) {
+				return NextResponse.json({ errores: ["El operador no existe."] }, { status: 404 });
+			}
+		} else {
+			operador = await obtenerOperadorAutorizado(operadorId);
+			if (!autorizado("operador.publicacion.modificar", sesion, operador)) {
+				return NextResponse.json({ errores: ["No tiene permisos para gestionar publicaciones de este Operador."] }, { status: 403 });
+			}
+		}
+		const vinculo = await db.orm.public.PublicacionOperador
+			.select("id")
+			.where({ publicacionId, operadorId: operador.id })
+			.first();
+		if (!vinculo) {
+			return NextResponse.json({ errores: ["La publicación no pertenece al operador seleccionado."] }, { status: 404 });
+		}
+		const resultado = await modificarPublicacionOperador(
+			operador.usuarioId, vinculo.id, cambios as CambiosPublicacionOperador, fotoNueva,
+			sesion.rol === "ADMINISTRADOR",
+		);
+		try {
+			const usuarioVinculado = await db.orm.public.Usuario.select("username").where({ id: operador.usuarioId }).first();
+			if (usuarioVinculado?.username) {
+				await registrarPublicacion(usuarioVinculado.username);
+			}
+		} catch (errEst) {
+			console.error("Error al registrar estadística de publicación:", errEst);
+		}
+		actualizarVistas(operador);
+		return NextResponse.json({ ...resultado, mensaje: "Publicación modificada correctamente." });
+	} catch (error) {
+		if (error instanceof ErrorAutorizacion) {
+			return NextResponse.json({ errores: [error.message] }, { status: error.status });
+		}
+		if (error instanceof ErrorEdicionPublicacion) {
+			return NextResponse.json({ errores: [error.message] }, { status: error.codigo === "NO_ENCONTRADA" ? 404 : error.codigo === "CONFLICTO" ? 409 : 400 });
+		}
+		console.error("Error al modificar publicación:", error);
+		return NextResponse.json({ errores: ["No se pudo modificar la publicación."] }, { status: 500 });
+	}
+}

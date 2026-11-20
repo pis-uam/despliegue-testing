@@ -1,0 +1,138 @@
+name: CI/CD - Release Pipeline
+
+on:
+  push:
+    branches:
+      - 'release/**'
+  workflow_dispatch:
+    
+jobs:
+  ci-release:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: uam
+          POSTGRES_PASSWORD: uam_local
+          POSTGRES_DB: uam
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uam -d uam"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: "postgresql://uam:uam_local@localhost:5432/uam?schema=public"
+      DATABASE_URL_TEST: "postgresql://uam:uam_local@localhost:5432/uam?schema=public"
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar lint
+        run: npm run lint
+
+      - name: Verificar tipos de TypeScript
+        run: npm run typecheck
+
+      - name: Aplicar migraciones de base de datos
+        run: npm run db:setup:demo
+
+      - name: Ejecutar Suite Completa de Tests (Vitest)
+        env:
+          DATABASE_URL: ""
+        run: npm run test:vitest
+
+      - name: Instalar Navegadores de Playwright
+        run: npx playwright install --with-deps
+
+      - name: Verificar build de producción
+        run: npm run build
+
+      - name: Iniciar servidor y ejecutar Tests E2E (Playwright)
+        env:
+          DATABASE_URL_TEST: "postgresql://uam:uam_local@localhost:5432/uam_bp25?schema=public"
+          E2E_OPERADOR_USU: ${{ secrets.E2E_OPERADOR_USU }}
+          E2E_OPERADOR_PASS: ${{ secrets.E2E_OPERADOR_PASS }}
+          E2E_PRODUCTOR_USU: ${{ secrets.E2E_PRODUCTOR_USU }}
+          E2E_PRODUCTOR_PASS: ${{ secrets.E2E_PRODUCTOR_PASS }}
+          E2E_ADMINISTRADOR_USU: ${{ secrets.E2E_ADMINISTRADOR_USU }}
+          E2E_ADMINISTRADOR_PASS: ${{ secrets.E2E_ADMINISTRADOR_PASS }}
+          E2E_INHABILITADO_USU: ${{ secrets.E2E_INHABILITADO_USU }}
+          E2E_INHABILITADO_PASS: ${{ secrets.E2E_INHABILITADO_PASS }}
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const cliente = new pg.Client({ connectionString: process.env.DATABASE_URL }); await cliente.connect(); try { await cliente.query("CREATE DATABASE uam_bp25"); } finally { await cliente.end(); }'
+          export SESSION_SECRET="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          export TWO_FACTOR_ENCRYPTION_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          npm run start &
+          npx wait-on http://localhost:3000 --timeout 60000
+          npx playwright test --pass-with-no-tests
+
+  # CD - Despliegue a Staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    needs: ci-release
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Emitir contrato y aplicar migraciones en Staging
+        run: |
+          npm run db:contract
+          npm run db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Desplegar en Staging
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }}
+          dockerfilePath: Dockerfile
+          registryUrl: uamgrupo10acr.azurecr.io
+          registryUsername: ${{ secrets.REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.REGISTRY_PASSWORD }}
+          containerAppName: uam-staging
+          resourceGroup: Proyecto-PIS-2026
+          environmentVariables: >-
+            DATABASE_URL=${{ secrets.STAGING_DATABASE_URL  }}
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+            TWO_FACTOR_ENCRYPTION_KEY=${{ secrets.TWO_FACTOR_ENCRYPTION_KEY }}
+            PRECIOS_REFERENCIA_FUENTE=${{ secrets.PRECIOS_REFERENCIA_FUENTE }}
+            PRECIOS_REFERENCIA_WEBSERVICE_BASE_URL=${{ secrets.PRECIOS_REFERENCIA_WEBSERVICE_BASE_URL }}
+            PRECIOS_REFERENCIA_JWT_TOKEN=${{ secrets.PRECIOS_REFERENCIA_JWT_TOKEN }}
+            PRECIOS_HISTORICOS_ENDPOINT=${{ secrets.PRECIOS_HISTORICOS_ENDPOINT }}

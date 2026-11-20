@@ -1,0 +1,35 @@
+services:
+  uam:
+    image: ${UAM_IMAGE:?Debe indicar la imagen}
+
+    container_name: uam-app-prod
+    restart: unless-stopped
+
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      PRECIOS_REFERENCIA_FUENTE: ${PRECIOS_REFERENCIA_FUENTE:-webservice}
+      PRECIOS_REFERENCIA_WEBSERVICE_BASE_URL: ${PRECIOS_REFERENCIA_WEBSERVICE_BASE_URL:?Debe configurar la URL del webservice}
+      PRECIOS_HISTORICOS_ENDPOINT: ${PRECIOS_HISTORICOS_ENDPOINT:?Debe configurar el endpoint de históricos}
+
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    secrets:
+      - database_url
+      - session_secret
+      - two_factor_encryption_key
+      - precios_referencia_jwt_token
+
+secrets:
+  database_url:
+    file: /etc/uam/secrets/database_url
+
+  session_secret:
+    file: /etc/uam/secrets/session_secret
+
+  two_factor_encryption_key:
+    file: /etc/uam/secrets/two_factor_encryption_key
+
+  precios_referencia_jwt_token:
+    file: /etc/uam/secrets/precios_referencia_jwt_token

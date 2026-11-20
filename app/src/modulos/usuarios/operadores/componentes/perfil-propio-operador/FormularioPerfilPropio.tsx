@@ -1,0 +1,172 @@
+"use client";
+
+import { useRef, useState, type FormEvent } from "react";
+import { Temporal } from "temporal-polyfill";
+import { useRouter } from "next/navigation";
+import { useNotificacionToast } from "@/compartido/componentes/NotificacionToast";
+import TextField from "@mui/material/TextField";
+import SelectorFecha from "@/compartido/componentes/SelectorFecha";
+import MenuItem from "@mui/material/MenuItem";
+import Switch from "@mui/material/Switch";
+import SelectorFotoPerfil, { argumentosFotoPerfil, type CambioFotoPerfil } from "@/modulos/usuarios/componentes/SelectorFotoPerfil";
+import { modificarPerfilPropio } from "../../acciones/modificar-perfil-propio";
+import type { PerfilPropioOperador } from "../../consultas/consultas-perfil-propio";
+import { LARGO_MAXIMO_COMENTARIO_LICENCIA } from "../../comentario-licencia";
+import HojasDecorativas from "@/compartido/componentes/HojasDecorativas";
+import BotonVolver from "@/compartido/componentes/BotonVolver";
+import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
+import ConfirmacionLicencia from "../ConfirmacionLicencia";
+import styles from "./FormularioPerfilPropio.module.css";
+
+const CODIGOS_PAIS = [
+    { codigo: "+598", pais: "Uruguay" },
+    { codigo: "+54", pais: "Argentina" },
+    { codigo: "+55", pais: "Brasil" },
+    { codigo: "+56", pais: "Chile" },
+    { codigo: "+595", pais: "Paraguay" },
+];
+
+function separar(contacto: string | null) {
+    const codigo = CODIGOS_PAIS.find((item) => contacto?.startsWith(item.codigo))?.codigo ?? "+598";
+    const telefono = contacto?.startsWith(codigo) ? contacto.slice(codigo.length) : "";
+    return { codigo, telefono };
+}
+
+function extraerLicencia(comentario: string | null) {
+    const coincidencia = comentario?.match(/^Licencia:\s*(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})\s*(?:\r?\n\r?\n)?([\s\S]*)$/);
+    return {
+        inicio: coincidencia?.[1] ?? "",
+        fin: coincidencia?.[2] ?? "",
+        comentario: coincidencia?.[3] ?? comentario ?? "",
+    };
+}
+
+export default function FormularioPerfilPropio({ perfil, alCancelar }: { perfil: PerfilPropioOperador; alCancelar: () => void }) {
+    const router = useRouter();
+    const { notificar } = useNotificacionToast();
+    const actual = separar(perfil.contacto);
+    const [codigoPais, setCodigoPais] = useState(actual.codigo);
+    const [telefono, setTelefono] = useState(actual.telefono);
+    const [nombre, setNombre] = useState(perfil.nombre);
+    const licencia = extraerLicencia(perfil.comentario);
+    const [enLicencia, setEnLicencia] = useState(perfil.enLicencia);
+    const [confirmandoLicencia, setConfirmandoLicencia] = useState(false);
+    const [inicioLicencia, setInicioLicencia] = useState(licencia.inicio);
+    const [finLicencia, setFinLicencia] = useState(licencia.fin);
+    const hoy = Temporal.Now.plainDateISO("America/Montevideo").toString();
+    const finLicenciaMinimo = inicioLicencia > hoy ? inicioLicencia : hoy;
+    const [comentario, setComentario] = useState(licencia.comentario);
+    const [foto, setFoto] = useState<CambioFotoPerfil>(undefined);
+    const [guardando, setGuardando] = useState(false);
+    const enCurso = useRef(false);
+    async function guardar(evento: FormEvent<HTMLFormElement>) {
+        evento.preventDefault();
+        if (enCurso.current) return;
+        enCurso.current = true;
+        setGuardando(true);
+        try {
+            const resultado = await modificarPerfilPropio({
+                nombre,
+                codigoPais,
+                telefono,
+                enLicencia,
+                inicioLicencia,
+                finLicencia,
+                comentario,
+            }, ...argumentosFotoPerfil(foto));
+            if (!resultado.esValido) {
+                notificar(resultado.errores.join("\n"), "error");
+                return;
+            }
+            notificar(resultado.mensaje, "success");
+            alCancelar();
+            router.refresh();
+        } catch {
+            notificar("No se pudieron guardar los cambios. Intentá nuevamente.", "error");
+        } finally {
+            enCurso.current = false;
+            setGuardando(false);
+        }
+    }
+
+    return (
+        <main className={styles.pagina}>
+            <div className={styles.contenedor}>
+                <BotonVolver onClick={alCancelar} disabled={guardando} className={styles.volver}>
+                    Volver a mi perfil
+                </BotonVolver>
+                <header className={styles.encabezado}>
+                    <HojasDecorativas />
+                    <h1 className={styles.titulo}>Editar mi perfil</h1>
+                    <p className={styles.descripcion}>Actualizar información de <strong>{perfil.nombreUsuario}</strong></p>
+                </header>
+                <form className={styles.formulario} onSubmit={guardar} noValidate>
+                    <section className={styles.seccion}>
+                        <SelectorFotoPerfil nombre={nombre} fotoActual={perfil.fotoPerfil} cambio={foto} alCambiar={setFoto} alError={(mensaje) => notificar(mensaje, "error")} deshabilitado={guardando} />
+                        <TextField label="Nombre" required value={nombre} onChange={(event) => setNombre(event.target.value)} disabled={guardando} fullWidth />
+                        
+                        <div className={styles.telefono}>
+                            <TextField select label="Código de país" required value={codigoPais} onChange={(event) => setCodigoPais(event.target.value)} disabled={guardando}>
+                                {CODIGOS_PAIS.map(({ codigo, pais }) => <MenuItem key={codigo} value={codigo}>{codigo} ({pais})</MenuItem>)}
+                            </TextField>
+                            <TextField label="Teléfono" required type="tel" value={telefono} onChange={(event) => { if (/^[0-9]*$/.test(event.target.value)) setTelefono(event.target.value); }} disabled={guardando} />
+                        </div>
+                        <p className={styles.aviso}>
+                            <WarningAmberOutlinedIcon aria-hidden="true" className={styles.iconoAviso} />
+                            <span>La gestión de licencias debe tramitarse exclusivamente a través de los mecanismos habituales de la UAM. La información exhibida en este sitio tiene carácter meramente informativo.</span>
+                        </p>
+                        <label className={styles.licencia} htmlFor="perfil-propio-licencia" data-activa={enLicencia}>
+                            <span className={styles.textoLicencia}>
+                                <span className={styles.etiquetaLicencia}>En licencia</span>
+                                <span className={styles.estadoLicencia}>{enLicencia ? "Sí" : "No"}</span>
+                            </span>
+                            <Switch
+                                checked={enLicencia}
+                                onChange={(_, valor) => {
+                                    if (valor) setConfirmandoLicencia(true);
+                                    else setEnLicencia(false);
+                                }}
+                                disabled={guardando}
+                                slotProps={{ input: { id: "perfil-propio-licencia", role: "switch", "aria-label": "En licencia" } }}
+                            />
+                        </label>
+                        {enLicencia && (
+                            <>
+                                <div className={styles.fechasLicencia}>
+                                    <SelectorFecha
+                                        label="Inicio de licencia"
+                                        required
+                                        value={inicioLicencia}
+                                        onChange={setInicioLicencia}
+                                        disabled={guardando}
+                                    />
+                                    <SelectorFecha
+                                        label="Fin de licencia"
+                                        required
+                                        value={finLicencia}
+                                        onChange={setFinLicencia}
+                                        disabled={guardando}
+                                        min={finLicenciaMinimo}
+                                    />
+                                </div>
+                                <TextField label="Mensaje de recomendación" multiline minRows={3} value={comentario} onChange={(event) => setComentario(event.target.value)} disabled={guardando} fullWidth
+                                    slotProps={{ htmlInput: { maxLength: LARGO_MAXIMO_COMENTARIO_LICENCIA } }}
+                                    helperText={`${comentario.length}/${LARGO_MAXIMO_COMENTARIO_LICENCIA} caracteres`}
+                                    error={comentario.length > LARGO_MAXIMO_COMENTARIO_LICENCIA} />
+                            </>
+                        )}
+                    </section>
+                    <div className={styles.acciones}>
+                        <button className={styles.cancelar} type="button" onClick={alCancelar} disabled={guardando}>Cancelar</button>
+                        <button className={styles.guardar} type="submit" disabled={guardando}>{guardando ? "Guardando..." : "Guardar cambios"}</button>
+                    </div>
+                </form>
+            </div>
+            <ConfirmacionLicencia
+                abierto={confirmandoLicencia}
+                alAceptar={() => { setEnLicencia(true); setConfirmandoLicencia(false); }}
+                alCancelar={() => setConfirmandoLicencia(false)}
+            />
+        </main>
+    );
+}
