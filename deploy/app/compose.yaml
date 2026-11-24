@@ -8,6 +8,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
+      AUTH_COOKIE_SECURE: "false"
       PRECIOS_REFERENCIA_FUENTE: ${PRECIOS_REFERENCIA_FUENTE:-webservice}
       PRECIOS_REFERENCIA_WEBSERVICE_BASE_URL: ${PRECIOS_REFERENCIA_WEBSERVICE_BASE_URL:?Debe configurar la URL del webservice}
       PRECIOS_HISTORICOS_ENDPOINT: ${PRECIOS_HISTORICOS_ENDPOINT:?Debe configurar el endpoint de históricos}
